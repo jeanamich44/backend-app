@@ -1,3 +1,4 @@
+import json
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -78,11 +79,20 @@ async def payment_history(
 
 @router.post("/webhook")
 async def sumup_webhook(payload: Dict[str, Any]):
-    event_type = payload.get("event_type")
-    checkout_id = payload.get("id") or payload.get("checkout_id")
-    if checkout_id:
-        try:
-            await verify_checkout(checkout_id)
-        except Exception:
-            pass
-    return {"status": "received"}
+    print(f"[RENDER WEBHOOK] Ping SumUp reçu: {json.dumps(payload)}", flush=True)
+    checkout_id = payload.get("id") or payload.get("checkout_id") or payload.get("resource_id")
+    if not checkout_id and "event" in payload and isinstance(payload.get("event"), dict):
+        checkout_id = payload["event"].get("id") or payload["event"].get("checkout_id")
+
+    if not checkout_id:
+        print("[RENDER WEBHOOK WARNING] Aucun checkout_id détecté dans le ping", flush=True)
+        return {"status": "ignored", "reason": "no_checkout_id"}
+
+    print(f"[RENDER WEBHOOK] Déclenchement vérification S2S pour checkout_id={checkout_id}", flush=True)
+    try:
+        result = await verify_checkout(checkout_id)
+        print(f"[RENDER WEBHOOK SUCCÈS] Statut vérifié: {result.get('status')}", flush=True)
+        return {"status": "processed", "result": result.get("status")}
+    except Exception as e:
+        print(f"[RENDER WEBHOOK ERREUR] Échec traitement pour {checkout_id}: {str(e)}", flush=True)
+        return {"status": "error", "detail": str(e)}

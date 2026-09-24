@@ -1,3 +1,4 @@
+import os
 import time
 import uuid
 import json
@@ -94,6 +95,11 @@ async def create_checkout(
     token = await get_sumup_access_token(bank_name)
     ref = str(uuid.uuid4())
 
+    backend_base = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("BACKEND_PUBLIC_URL") or "https://backend-app-eas7.onrender.com"
+    webhook_url = f"{backend_base.rstrip('/')}/api/payments/webhook"
+
+    print(f"[RENDER SUMUP CREATE] Initialisation checkout: user={user_id}, montant={amount}€, return_url={webhook_url}", flush=True)
+
     async with httpx.AsyncClient(timeout=15.0) as client:
         res = await client.post(
             f"{SUMUP_API_BASE}/v0.1/checkouts",
@@ -103,6 +109,7 @@ async def create_checkout(
                 "currency": "EUR",
                 "pay_to_email": config["pay_to_email"],
                 "description": f"Recharge {amount:.2f} EUR",
+                "return_url": webhook_url,
                 "hosted_checkout": {"enabled": True},
             },
             headers={
@@ -111,12 +118,15 @@ async def create_checkout(
             },
         )
         if res.status_code not in (200, 201):
+            print(f"[RENDER SUMUP CREATE ERREUR] Statut={res.status_code}, Réponse={res.text}", flush=True)
             raise HTTPException(status_code=502, detail="Création checkout SumUp échouée")
 
         data = res.json()
         checkout_id = data.get("id")
         if not checkout_id:
             raise HTTPException(status_code=502, detail="Réponse SumUp invalide sans checkout id")
+
+        print(f"[RENDER SUMUP CREATE SUCCÈS] Checkout ID: {checkout_id}, Ref: {ref}", flush=True)
 
         pool = await get_db_pool()
         async with pool.acquire() as conn:
@@ -145,6 +155,8 @@ async def verify_checkout(
     checkout_id: str,
     user_id: Optional[int] = None
 ) -> Dict[str, Any]:
+    print(f"[RENDER SUMUP VERIFY] Requête vérification pour {checkout_id} (user_id={user_id})", flush=True)
+
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         payment = await conn.fetchrow(
@@ -153,6 +165,7 @@ async def verify_checkout(
         )
 
     if not payment:
+        print(f"[RENDER SUMUP VERIFY ERREUR] Paiement {checkout_id} inexistant en BDD", flush=True)
         raise HTTPException(status_code=404, detail="Paiement introuvable")
 
     if user_id and payment["user_id"] != user_id:
@@ -163,6 +176,7 @@ async def verify_checkout(
     payer_id = payment["user_id"]
 
     if current_status == "PAID":
+        print(f"[RENDER SUMUP VERIFY DÉJÀ PAYÉ] Checkout {checkout_id} déjà marqué PAID pour user {payer_id}", flush=True)
         async with pool.acquire() as conn:
             user_row = await conn.fetchrow("SELECT balance FROM tma_users WHERE id = $1", payer_id)
             balance = float(user_row["balance"]) if user_row else 0.0
@@ -192,6 +206,7 @@ async def verify_checkout(
             headers={"Authorization": f"Bearer {token}"},
         )
         if res.status_code != 200:
+            print(f"[RENDER SUMUP API ERREUR] Code {res.status_code} pour {checkout_id}", flush=True)
             return {
                 "checkout_id": checkout_id,
                 "status": current_status,
@@ -200,6 +215,7 @@ async def verify_checkout(
 
         sumup_data = res.json()
         remote_status = str(sumup_data.get("status", "")).upper()
+        print(f"[RENDER SUMUP API RÉPONSE] Statut officiel reçu pour {checkout_id}: {remote_status}", flush=True)
 
     if remote_status == "PAID":
         async with pool.acquire() as conn:
@@ -225,6 +241,7 @@ async def verify_checkout(
                         payer_id
                     )
                     new_balance = float(user_upd["balance"]) if user_upd else 0.0
+                    print(f"[RENDER SUMUP CRÉDIT EFFECTUÉ] User {payer_id} crédité de +{amount}€ (Solde={new_balance}€)", flush=True)
                 else:
                     user_row = await conn.fetchrow("SELECT balance FROM tma_users WHERE id = $1", payer_id)
                     new_balance = float(user_row["balance"]) if user_row else 0.0
