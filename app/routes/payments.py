@@ -1,6 +1,6 @@
 import json
 from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from app.auth import get_current_user
 from app.services.sumup import create_checkout, verify_checkout
@@ -96,3 +96,9 @@ async def sumup_webhook(payload: Dict[str, Any]):
     except Exception as e:
         print(f"[RENDER WEBHOOK ERREUR] Échec traitement pour {checkout_id}: {str(e)}", flush=True)
         return {"status": "error", "detail": str(e)}
+
+# =====================================================================
+
+@router.api_route("/webhook", methods=["GET", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
+async def reject_webhook_non_post():
+    return Response(status_code=404)
