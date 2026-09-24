@@ -126,7 +126,7 @@ async def create_checkout(
             print(f"[RENDER SUMUP BLOCAGE] Quota atteint: user {user_id} a déjà généré {daily_count} factures sur 24h", flush=True)
             raise HTTPException(
                 status_code=429,
-                detail="Plafond journalier de 7 recharges atteint. Réessayez dans 24 heures."
+                detail="Quota atteint"
             )
 
     config = await get_bank_config(bank_name)
