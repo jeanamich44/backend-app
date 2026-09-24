@@ -136,7 +136,7 @@ async def create_checkout(
     backend_base = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("BACKEND_PUBLIC_URL") or "https://backend-app-eas7.onrender.com"
     webhook_url = f"{backend_base.rstrip('/')}/api/payments/webhook"
 
-    valid_until = (datetime.now(timezone.utc) + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%S%z")
+    valid_until = (datetime.now(timezone.utc) + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     print(f"[RENDER SUMUP CREATE] Initialisation checkout: user={user_id}, montant={amount}€, return_url={webhook_url}", flush=True)
 
