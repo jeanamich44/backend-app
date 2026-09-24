@@ -3,7 +3,7 @@ from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from app.auth import get_current_user
-from app.services.sumup import create_checkout, verify_checkout
+from app.services.sumup import create_checkout, verify_checkout, get_pending_checkout, cancel_checkout
 from app.db import get_db_pool
 
 # =====================================================================
@@ -42,6 +42,22 @@ async def check_payment(
 ):
     result = await verify_checkout(checkout_id=checkout_id, user_id=user["id"])
     return result
+
+# =====================================================================
+
+@router.get("/pending")
+async def get_current_pending_payment(
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    return await get_pending_checkout(user_id=user["id"])
+
+# =====================================================================
+
+@router.post("/cancel")
+async def cancel_current_pending_payment(
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    return await cancel_checkout(user_id=user["id"])
 
 # =====================================================================
 

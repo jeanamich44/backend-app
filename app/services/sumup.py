@@ -91,6 +91,30 @@ async def create_checkout(
     if amount < 1.0 or amount > 60.0:
         raise HTTPException(status_code=400, detail="Montant invalide (limite 1€ à 60€)")
 
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        pending = await conn.fetchrow(
+            "SELECT checkout_id FROM tma_payments WHERE user_id = $1 AND status = 'PENDING' LIMIT 1",
+            user_id
+        )
+        if pending:
+            print(f"[RENDER SUMUP BLOCAGE] Refus création: user {user_id} possède déjà une facture PENDING ({pending['checkout_id']})", flush=True)
+            raise HTTPException(
+                status_code=409,
+                detail="Vous avez déjà un paiement en attente. Veuillez finaliser votre règlement ou annuler la facture en cours."
+            )
+
+        daily_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM tma_payments WHERE user_id = $1 AND created_at >= NOW() - INTERVAL '24 hours'",
+            user_id
+        )
+        if daily_count and daily_count >= 7:
+            print(f"[RENDER SUMUP BLOCAGE] Quota atteint: user {user_id} a déjà généré {daily_count} factures sur 24h", flush=True)
+            raise HTTPException(
+                status_code=429,
+                detail="Plafond journalier de 7 recharges atteint. Réessayez dans 24 heures."
+            )
+
     config = await get_bank_config(bank_name)
     token = await get_sumup_access_token(bank_name)
     ref = str(uuid.uuid4())
@@ -275,4 +299,90 @@ async def verify_checkout(
         "checkout_id": checkout_id,
         "status": "PENDING",
         "amount": amount
+    }
+
+# =====================================================================
+
+async def get_pending_checkout(user_id: int) -> Optional[Dict[str, Any]]:
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT checkout_id, amount, created_at, sumup_payload
+            FROM tma_payments
+            WHERE user_id = $1 AND status = 'PENDING'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            user_id
+        )
+    if not row:
+        return None
+
+    return {
+        "checkout_id": row["checkout_id"],
+        "amount": float(row["amount"]),
+        "payment_url": f"{SUMUP_CHECKOUT_PREFIX}{row['checkout_id']}",
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None
+    }
+
+# =====================================================================
+
+async def cancel_checkout(user_id: int) -> Dict[str, Any]:
+    print(f"[RENDER SUMUP CANCEL] Demande d'annulation de facture en attente pour user {user_id}", flush=True)
+
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        payment = await conn.fetchrow(
+            """
+            SELECT checkout_id, sumup_payload
+            FROM tma_payments
+            WHERE user_id = $1 AND status = 'PENDING'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            user_id
+        )
+
+        if not payment:
+            print(f"[RENDER SUMUP CANCEL] Aucune facture PENDING trouvée pour user {user_id}", flush=True)
+            raise HTTPException(status_code=404, detail="Aucune facture en attente à annuler.")
+
+        checkout_id = payment["checkout_id"]
+        payload = payment["sumup_payload"]
+        bank_name = "bank2"
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                payload = {}
+        if isinstance(payload, dict) and payload.get("bank"):
+            bank_name = payload["bank"]
+
+        try:
+            token = await get_sumup_access_token(bank_name)
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                res = await client.delete(
+                    f"{SUMUP_API_BASE}/v0.1/checkouts/{checkout_id}",
+                    headers={"Authorization": f"Bearer {token}"}
+                )
+                print(f"[RENDER SUMUP CANCEL API] Statut API DELETE: {res.status_code}", flush=True)
+        except Exception as ex:
+            print(f"[RENDER SUMUP CANCEL API ERREUR] {str(ex)}", flush=True)
+
+        await conn.execute(
+            """
+            UPDATE tma_payments
+            SET status = 'CANCELLED', updated_at = NOW()
+            WHERE checkout_id = $1
+            """,
+            checkout_id
+        )
+        print(f"[RENDER SUMUP CANCEL SUCCÈS] Facture {checkout_id} marquée CANCELLED pour user {user_id}", flush=True)
+
+    return {
+        "success": True,
+        "checkout_id": checkout_id,
+        "status": "CANCELLED",
+        "message": "Facture en attente annulée avec succès."
     }
