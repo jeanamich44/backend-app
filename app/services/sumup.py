@@ -3,6 +3,7 @@ import time
 import uuid
 import json
 import httpx
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, Tuple
 from fastapi import HTTPException
 from app.db import get_db_pool
@@ -93,17 +94,30 @@ async def create_checkout(
 
     pool = await get_db_pool()
     async with pool.acquire() as conn:
-        pending = await conn.fetchrow(
-            "SELECT checkout_id FROM tma_payments WHERE user_id = $1 AND status = 'PENDING' LIMIT 1",
+        await conn.execute(
+            """
+            UPDATE tma_payments
+            SET status = 'EXPIRED', updated_at = NOW()
+            WHERE user_id = $1 AND status = 'PENDING' AND created_at < NOW() - INTERVAL '30 minutes'
+            """,
             user_id
         )
-        if pending:
-            print(f"[RENDER SUMUP BLOCAGE] Refus création: user {user_id} possède déjà une facture PENDING ({pending['checkout_id']})", flush=True)
+
+        pending = await conn.fetchrow(
+            "SELECT checkout_id FROM tma_payments WHERE user_id = $1 AND status = 'PENDING' ORDER BY created_at DESC LIMIT 1",
+            user_id
+        )
+
+    if pending:
+        check_res = await verify_checkout(pending["checkout_id"], user_id=user_id)
+        if check_res.get("status") == "PENDING":
+            print(f"[RENDER SUMUP BLOCAGE] Refus création: user {user_id} possède déjà une facture PENDING active ({pending['checkout_id']})", flush=True)
             raise HTTPException(
                 status_code=409,
                 detail="Vous avez déjà un paiement en attente. Veuillez finaliser votre règlement ou annuler la facture en cours."
             )
 
+    async with pool.acquire() as conn:
         daily_count = await conn.fetchval(
             "SELECT COUNT(*) FROM tma_payments WHERE user_id = $1 AND created_at >= NOW() - INTERVAL '24 hours'",
             user_id
@@ -122,6 +136,8 @@ async def create_checkout(
     backend_base = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("BACKEND_PUBLIC_URL") or "https://backend-app-eas7.onrender.com"
     webhook_url = f"{backend_base.rstrip('/')}/api/payments/webhook"
 
+    valid_until = (datetime.now(timezone.utc) + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%S%z")
+
     print(f"[RENDER SUMUP CREATE] Initialisation checkout: user={user_id}, montant={amount}€, return_url={webhook_url}", flush=True)
 
     async with httpx.AsyncClient(timeout=15.0) as client:
@@ -134,6 +150,7 @@ async def create_checkout(
                 "pay_to_email": config["pay_to_email"],
                 "description": f"Recharge {amount:.2f} EUR",
                 "return_url": webhook_url,
+                "valid_until": valid_until,
                 "hosted_checkout": {"enabled": True},
             },
             headers={
@@ -152,7 +169,6 @@ async def create_checkout(
 
         print(f"[RENDER SUMUP CREATE SUCCÈS] Checkout ID: {checkout_id}, Ref: {ref}", flush=True)
 
-        pool = await get_db_pool()
         async with pool.acquire() as conn:
             await conn.execute(
                 """
@@ -229,6 +245,19 @@ async def verify_checkout(
             f"{SUMUP_API_BASE}/v0.1/checkouts/{checkout_id}",
             headers={"Authorization": f"Bearer {token}"},
         )
+        if res.status_code == 404:
+            print(f"[RENDER SUMUP API 404] Checkout {checkout_id} non trouvé chez SumUp, bascule en EXPIRED", flush=True)
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE tma_payments SET status = 'EXPIRED', updated_at = NOW() WHERE checkout_id = $1",
+                    checkout_id
+                )
+            return {
+                "checkout_id": checkout_id,
+                "status": "EXPIRED",
+                "amount": amount
+            }
+
         if res.status_code != 200:
             print(f"[RENDER SUMUP API ERREUR] Code {res.status_code} pour {checkout_id}", flush=True)
             return {
@@ -238,10 +267,10 @@ async def verify_checkout(
             }
 
         sumup_data = res.json()
-        remote_status = str(sumup_data.get("status", "")).upper()
-        print(f"[RENDER SUMUP API RÉPONSE] Statut officiel reçu pour {checkout_id}: {remote_status}", flush=True)
+        raw_status = str(sumup_data.get("status", "")).upper()
+        print(f"[RENDER SUMUP API RÉPONSE] Statut officiel reçu pour {checkout_id}: {raw_status}", flush=True)
 
-    if remote_status == "PAID":
+    if raw_status in ("PAID", "SUCCESSFUL"):
         async with pool.acquire() as conn:
             async with conn.transaction():
                 upd = await conn.execute(
@@ -277,21 +306,54 @@ async def verify_checkout(
             "balance": new_balance
         }
 
-    elif remote_status in ("FAILED", "CANCELLED", "EXPIRED"):
+    elif raw_status in ("FAILED", "DECLINED"):
         async with pool.acquire() as conn:
             await conn.execute(
                 """
                 UPDATE tma_payments
-                SET status = $1, updated_at = NOW(), sumup_payload = $2::jsonb
-                WHERE checkout_id = $3
+                SET status = 'FAILED', updated_at = NOW(), sumup_payload = $1::jsonb
+                WHERE checkout_id = $2
                 """,
-                remote_status,
                 json.dumps(sumup_data),
                 checkout_id
             )
         return {
             "checkout_id": checkout_id,
-            "status": remote_status,
+            "status": "FAILED",
+            "amount": amount
+        }
+
+    elif raw_status in ("CANCELLED", "CANCELED"):
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE tma_payments
+                SET status = 'CANCELLED', updated_at = NOW(), sumup_payload = $1::jsonb
+                WHERE checkout_id = $2
+                """,
+                json.dumps(sumup_data),
+                checkout_id
+            )
+        return {
+            "checkout_id": checkout_id,
+            "status": "CANCELLED",
+            "amount": amount
+        }
+
+    elif raw_status == "EXPIRED":
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE tma_payments
+                SET status = 'EXPIRED', updated_at = NOW(), sumup_payload = $1::jsonb
+                WHERE checkout_id = $2
+                """,
+                json.dumps(sumup_data),
+                checkout_id
+            )
+        return {
+            "checkout_id": checkout_id,
+            "status": "EXPIRED",
             "amount": amount
         }
 
@@ -306,6 +368,15 @@ async def verify_checkout(
 async def get_pending_checkout(user_id: int) -> Optional[Dict[str, Any]]:
     pool = await get_db_pool()
     async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE tma_payments
+            SET status = 'EXPIRED', updated_at = NOW()
+            WHERE user_id = $1 AND status = 'PENDING' AND created_at < NOW() - INTERVAL '30 minutes'
+            """,
+            user_id
+        )
+
         row = await conn.fetchrow(
             """
             SELECT checkout_id, amount, created_at, sumup_payload
@@ -316,7 +387,13 @@ async def get_pending_checkout(user_id: int) -> Optional[Dict[str, Any]]:
             """,
             user_id
         )
+
     if not row:
+        return None
+
+    check_res = await verify_checkout(row["checkout_id"], user_id=user_id)
+    if check_res.get("status") != "PENDING":
+        print(f"[RENDER SUMUP PENDING CHECK] La facture {row['checkout_id']} n'est plus PENDING mais {check_res.get('status')}", flush=True)
         return None
 
     return {
