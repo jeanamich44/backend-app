@@ -30,6 +30,19 @@ async def init_db() -> asyncpg.Pool:
             ssl=ssl_ctx,
             command_timeout=60
         )
+        async with db_pool.acquire() as conn:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS stock (
+                    id SERIAL PRIMARY KEY,
+                    brand TEXT NOT NULL DEFAULT 'carr',
+                    code TEXT NOT NULL,
+                    pin TEXT DEFAULT '0000',
+                    value NUMERIC DEFAULT 0,
+                    price NUMERIC DEFAULT 0,
+                    is_sold BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+            """)
     return db_pool
 
 # =====================================================================
