@@ -171,6 +171,7 @@ async def admin_stats(admin: Any = Depends(get_current_admin)):
         "users_count": 0,
         "payments_count": 0,
         "payments_volume": 0.0,
+        "stock_count": 0,
         "generations_count": 0,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
@@ -187,6 +188,12 @@ async def admin_stats(admin: Any = Depends(get_current_admin)):
             if p_row:
                 stats["payments_count"] = int(p_row[0] or 0)
                 stats["payments_volume"] = float(p_row[1] or 0.0)
+        except Exception:
+            pass
+
+        try:
+            s_row = await conn.fetchval("SELECT COUNT(*) FROM stock WHERE brand = 'carr' AND is_sold = FALSE")
+            stats["stock_count"] = int(s_row or 0)
         except Exception:
             pass
 
@@ -326,6 +333,34 @@ async def admin_toggle_ban(payload: UserBanPayload, admin: Any = Depends(get_cur
 
 # =====================================================================
 
+@router.get("/payments")
+async def admin_get_payments(admin: Any = Depends(get_current_admin)):
+    if isinstance(admin, Response):
+        return admin
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, user_id, amount, currency, status, checkout_id, created_at
+            FROM tma_payments
+            ORDER BY created_at DESC
+            LIMIT 200
+        """)
+        payments = [
+            {
+                "id": str(row["id"]),
+                "chatId": str(row["user_id"]),
+                "trackId": row["checkout_id"] or "N/A",
+                "amount": float(row["amount"] or 0),
+                "method": "CB",
+                "status": row["status"] or "PAID",
+                "createdAt": row["created_at"].isoformat() if row["created_at"] else ""
+            }
+            for row in rows
+        ]
+    return {"payments": payments}
+
+# =====================================================================
+
 @router.get("/transactions")
 async def admin_get_transactions(admin: Any = Depends(get_current_admin)):
     if isinstance(admin, Response):
@@ -333,17 +368,20 @@ async def admin_get_transactions(admin: Any = Depends(get_current_admin)):
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT id, user_id, amount, status, created_at
+            SELECT id, user_id, amount, status, checkout_id, created_at
             FROM tma_payments
+            WHERE status = 'PAID'
             ORDER BY created_at DESC
-            LIMIT 100
+            LIMIT 200
         """)
         txs = [
             {
                 "id": str(row["id"]),
                 "userId": str(row["user_id"]),
                 "brand": "Rechargement CB",
+                "code": row["checkout_id"] or "N/A",
                 "price": float(row["amount"] or 0),
+                "valeur": float(row["amount"] or 0),
                 "status": row["status"],
                 "createdAt": row["created_at"].isoformat() if row["created_at"] else ""
             }
