@@ -6,6 +6,7 @@ from app.db import init_db, close_db
 from app.routes.user import router as user_router
 from app.routes.payments import router as payments_router
 from app.routes.admin import router as admin_router
+from app.middleware import RequestDecompressionMiddleware
 
 # =====================================================================
 
@@ -33,6 +34,7 @@ origins = [
     "http://127.0.0.1:3000"
 ]
 
+app.add_middleware(RequestDecompressionMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,

@@ -405,6 +405,13 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
                 raw_p = json.loads(raw_p)
             pay_data = raw_p if isinstance(raw_p, dict) else {}
 
+        gen_data = {}
+        if s_row and s_row["general"]:
+            raw_g = s_row["general"]
+            while isinstance(raw_g, str):
+                raw_g = json.loads(raw_g)
+            gen_data = raw_g if isinstance(raw_g, dict) else {}
+
         iptv_row = await conn.fetchrow("SELECT prices, config FROM services WHERE slug = 'iptv'")
         iptv_prices = {}
         iptv_config = {}
@@ -430,33 +437,35 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
             "host": iptv_config.get("host", ""),
             "type": iptv_config.get("type", "m3u"),
             "message_footer": iptv_config.get("message_footer", ""),
-            "price_1m": str(iptv_prices.get("price_1m") or iptv_prices.get("m3u_1_mois") or 10),
-            "price_3m": str(iptv_prices.get("price_3m") or iptv_prices.get("m3u_3_mois") or 25),
-            "price_6m": str(iptv_prices.get("price_6m") or iptv_prices.get("m3u_6_mois") or 45),
-            "price_12m": str(iptv_prices.get("price_12m") or iptv_prices.get("m3u_12_mois") or 70),
+            "price_1m": str(iptv_prices.get("price_1m") or iptv_prices.get("m3u_1_mois") or 5),
+            "price_3m": str(iptv_prices.get("price_3m") or iptv_prices.get("m3u_3_mois") or 10),
+            "price_6m": str(iptv_prices.get("price_6m") or iptv_prices.get("m3u_6_mois") or 15),
+            "price_12m": str(iptv_prices.get("price_12m") or iptv_prices.get("m3u_12_mois") or 35),
             "accounts": iptv_config.get("accounts", []),
             "panel_accounts": iptv_config.get("panel_accounts", [])
         },
+        "telegramMode": gen_data.get("telegramMode", "webhook"),
         "sumup": {
             "active": "sumup_bank2" if active_b == "bank2" else "sumup",
-            "expiration_minutes": str(pay_data.get("expirationMinutes", 30)),
+            "expiration_minutes": str(pay_data.get("expirationMinutes", 15)),
             "banks": {
                 "sumup": {
-                    "name": b1.get("name") or "Banque 1",
-                    "pay_to_email": b1.get("payToEmail", ""),
+                    "name": b1.get("name") or "gustave.pro@outlook.fr",
+                    "pay_to_email": b1.get("payToEmail", "gustave.pro@outlook.fr"),
                     "api_key": b1.get("apiKey", ""),
                     "client_id": b1.get("clientId", ""),
                     "client_secret": b1.get("clientSecret", "")
                 },
                 "sumup_bank2": {
-                    "name": b2.get("name") or "Banque 2",
-                    "pay_to_email": b2.get("payToEmail", ""),
+                    "name": b2.get("name") or "kevin.ebpro@outlook.fr",
+                    "pay_to_email": b2.get("payToEmail", "kevin.ebpro@outlook.fr"),
                     "api_key": b2.get("apiKey", ""),
                     "client_id": b2.get("clientId", ""),
                     "client_secret": b2.get("clientSecret", "")
                 }
             }
-        }
+        },
+        "oxapayApiKey": gen_data.get("oxapayApiKey", "UWUEMJ-HAHWDD-IYNN8Z-GDQ94H")
     }
 
 # =====================================================================
