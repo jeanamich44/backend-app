@@ -1,6 +1,9 @@
 import os
 import re
 import json
+import time
+import hmac
+import hashlib
 import secrets
 import httpx
 from datetime import datetime, timedelta, timezone
@@ -95,14 +98,36 @@ class PasswordPayload(BaseModel):
 
 # =====================================================================
 
+def _generate_admin_token() -> str:
+    ts = int(time.time())
+    rand = secrets.token_hex(16)
+    payload = f"{ts}:{rand}"
+    secret = (ADMIN_PASSWORD + os.getenv("INTERNAL_API_SECRET", "c8b9f1d0a83e47229b12480ad2e08e6f")).encode("utf-8")
+    sig = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{payload}:{sig}"
+
 def _is_valid_session(token: str) -> bool:
-    if not token or token not in _admin_sessions:
+    if not token:
         return False
-    exp = _admin_sessions[token]
-    if datetime.now(timezone.utc) > exp:
-        _admin_sessions.pop(token, None)
-        return False
-    return True
+    parts = token.split(":")
+    if len(parts) == 3:
+        ts_str, rand, sig = parts
+        try:
+            ts = int(ts_str)
+            if time.time() - ts > 86400:
+                return False
+            secret = (ADMIN_PASSWORD + os.getenv("INTERNAL_API_SECRET", "c8b9f1d0a83e47229b12480ad2e08e6f")).encode("utf-8")
+            expected_sig = hmac.new(secret, f"{ts}:{rand}".encode("utf-8"), hashlib.sha256).hexdigest()
+            return hmac.compare_digest(sig, expected_sig)
+        except Exception:
+            return False
+    if token in _admin_sessions:
+        exp = _admin_sessions[token]
+        if datetime.now(timezone.utc) > exp:
+            _admin_sessions.pop(token, None)
+            return False
+        return True
+    return False
 
 # =====================================================================
 
@@ -140,8 +165,7 @@ async def admin_login(payload: AdminLoginRequest):
     if not secrets.compare_digest(payload.password.strip(), ADMIN_PASSWORD.strip()):
         return Response(status_code=444)
 
-    token = secrets.token_hex(32)
-    _admin_sessions[token] = datetime.now(timezone.utc) + timedelta(hours=24)
+    token = _generate_admin_token()
     return {
         "success": True,
         "token": token,
@@ -691,6 +715,5 @@ async def admin_set_password(payload: PasswordPayload, admin: Any = Depends(get_
     if not payload.password.strip():
         return Response(status_code=400)
     ADMIN_PASSWORD = payload.password.strip()
-    new_token = secrets.token_hex(32)
-    _admin_sessions[new_token] = datetime.now(timezone.utc) + timedelta(hours=24)
+    new_token = _generate_admin_token()
     return {"success": True, "token": new_token}
