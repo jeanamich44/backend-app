@@ -44,6 +44,14 @@ async def get_payment_settings(requested_bank: Optional[str] = None) -> Tuple[Di
 
         bank_obj = pay_data.get(bank_name)
         if not isinstance(bank_obj, dict):
+            b_list = pay_data.get("banks_list", [])
+            if isinstance(b_list, list):
+                bank_obj = next((b for b in b_list if isinstance(b, dict) and b.get("id") == bank_name), None)
+
+        if not isinstance(bank_obj, dict):
+            bank_obj = pay_data.get("bank2") or pay_data.get("bank1")
+
+        if not isinstance(bank_obj, dict):
             raise HTTPException(status_code=500, detail=f"Configuration de {bank_name} absente en base")
 
         pay_to_email = bank_obj.get("payToEmail")
@@ -65,8 +73,6 @@ async def get_payment_settings(requested_bank: Optional[str] = None) -> Tuple[Di
 # =====================================================================
 
 async def get_bank_config(bank_name: str) -> Dict[str, str]:
-    if bank_name not in ("bank1", "bank2"):
-        raise HTTPException(status_code=400, detail=f"Banque '{bank_name}' non reconnue")
     config, _, _ = await get_payment_settings(bank_name)
     return config
 

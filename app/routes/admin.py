@@ -74,21 +74,19 @@ class IptvSettingsPayload(BaseModel):
     accounts: Optional[List[Dict[str, Any]]] = []
     panel_accounts: Optional[List[Dict[str, Any]]] = []
 
-class SumUpBankPayload(BaseModel):
+class BankItemPayload(BaseModel):
+    id: Optional[str] = "bank1"
     name: Optional[str] = ""
     pay_to_email: str
     api_key: str
     client_id: str
     client_secret: str
 
-class SumUpBanksPayload(BaseModel):
-    sumup: SumUpBankPayload
-    sumup_bank2: SumUpBankPayload
-
 class SumUpSettingsPayload(BaseModel):
     active: str
     expiration_minutes: Any
-    banks: SumUpBanksPayload
+    banks: Optional[Any] = None
+    banks_list: Optional[List[BankItemPayload]] = None
 
 class MaintenancePayload(BaseModel):
     maintenance: bool
@@ -456,27 +454,69 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
                 while isinstance(raw_c, str):
                     raw_c = json.loads(raw_c)
                 iptv_config = raw_c if isinstance(raw_c, dict) else {}
+        accounts = iptv_config.get("accounts")
+        if not accounts or not isinstance(accounts, list) or len(accounts) == 0:
+            acc_key = iptv_config.get("api_key", "c747279bd5a2284570cd5e888ef182f6")
+            acc_pack = iptv_config.get("pack") or iptv_config.get("package_id") or iptv_config.get("bouquet") or "47013"
+            acc_url = iptv_config.get("api_url", "https://4k.cms-only.ru/api/api.php")
+            accounts = [{
+                "name": iptv_config.get("name", "ChezRheyy"),
+                "pack": str(acc_pack),
+                "api_key": str(acc_key),
+                "api_url": str(acc_url),
+                "active": True
+            }]
 
-    active_b = pay_data.get("activeBank", "bank2")
-    b1 = pay_data.get("bank1", {})
-    b2 = pay_data.get("bank2", {})
+        panel_accounts = iptv_config.get("panel_accounts")
+        if not panel_accounts or not isinstance(panel_accounts, list) or len(panel_accounts) == 0:
+            p_user = iptv_config.get("username", "LABANK")
+            p_pass = iptv_config.get("password", "LECOFFREFORTT")
+            panel_accounts = [{
+                "name": iptv_config.get("name", "ChezRheyy"),
+                "username": str(p_user),
+                "password": str(p_pass),
+                "active": True
+            }]
+
+        active_b = pay_data.get("activeBank", "bank2")
+        banks_list = []
+        if isinstance(pay_data.get("banks_list"), list) and pay_data["banks_list"]:
+            banks_list = pay_data["banks_list"]
+        else:
+            b_keys = sorted([k for k in pay_data.keys() if k.startswith("bank") and isinstance(pay_data[k], dict)])
+            if not b_keys:
+                b_keys = ["bank1", "bank2"]
+            for idx, k in enumerate(b_keys):
+                b_val = pay_data.get(k, {})
+                banks_list.append({
+                    "id": k,
+                    "name": b_val.get("name") or f"Banque {idx + 1}",
+                    "pay_to_email": b_val.get("payToEmail", ""),
+                    "api_key": b_val.get("apiKey", ""),
+                    "client_id": b_val.get("clientId", ""),
+                    "client_secret": b_val.get("clientSecret", "")
+                })
+
+        b1 = pay_data.get("bank1", {})
+        b2 = pay_data.get("bank2", {})
 
     return {
         "iptv": {
-            "host": iptv_config.get("host", ""),
+            "host": iptv_config.get("host") or "http://cf.business-cloud-neo.com",
             "type": iptv_config.get("type", "m3u"),
             "message_footer": iptv_config.get("message_footer", ""),
             "price_1m": str(iptv_prices.get("price_1m") or iptv_prices.get("m3u_1_mois") or 5),
             "price_3m": str(iptv_prices.get("price_3m") or iptv_prices.get("m3u_3_mois") or 10),
-            "price_6m": str(iptv_prices.get("price_6m") or iptv_prices.get("m3u_6_mois") or 15),
+            "price_6m": str(iptv_prices.get("price_6m") or iptv_prices.get("m3u_6_mois") or 20),
             "price_12m": str(iptv_prices.get("price_12m") or iptv_prices.get("m3u_12_mois") or 35),
-            "accounts": iptv_config.get("accounts", []),
-            "panel_accounts": iptv_config.get("panel_accounts", [])
+            "accounts": accounts,
+            "panel_accounts": panel_accounts
         },
         "telegramMode": gen_data.get("telegramMode", "webhook"),
         "sumup": {
-            "active": "sumup_bank2" if active_b == "bank2" else "sumup",
+            "active": active_b,
             "expiration_minutes": str(pay_data.get("expirationMinutes", 15)),
+            "banks_list": banks_list,
             "banks": {
                 "sumup": {
                     "name": b1.get("name") or "gustave.pro@outlook.fr",
@@ -535,6 +575,24 @@ async def admin_save_iptv(payload: IptvSettingsPayload, admin: Any = Depends(get
         config["message_footer"] = payload.message_footer or ""
         config["accounts"] = payload.accounts or []
         config["panel_accounts"] = payload.panel_accounts or []
+
+        active_acc = next((a for a in (payload.accounts or []) if a.get("active")), None)
+        if not active_acc and payload.accounts:
+            active_acc = payload.accounts[0]
+        if active_acc:
+            config["api_key"] = active_acc.get("api_key", "")
+            config["pack"] = active_acc.get("pack", "")
+            config["package_id"] = active_acc.get("pack", "")
+            config["bouquet"] = active_acc.get("pack", "")
+            if active_acc.get("api_url"):
+                config["api_url"] = active_acc.get("api_url")
+
+        active_panel = next((p for p in (payload.panel_accounts or []) if p.get("active")), None)
+        if not active_panel and payload.panel_accounts:
+            active_panel = payload.panel_accounts[0]
+        if active_panel:
+            config["username"] = active_panel.get("username", "")
+            config["password"] = active_panel.get("password", "")
 
         await conn.execute(
             "UPDATE services SET prices = $1, config = $2 WHERE slug = 'iptv'",
@@ -637,27 +695,53 @@ async def admin_save_sumup(payload: SumUpSettingsPayload, admin: Any = Depends(g
                 raw_p = json.loads(raw_p)
             pay_data = raw_p if isinstance(raw_p, dict) else {}
 
-        pay_data["activeBank"] = "bank2" if payload.active == "sumup_bank2" else "bank1"
+        active_bank = payload.active
+        if active_bank == "sumup":
+            active_bank = "bank1"
+        elif active_bank == "sumup_bank2":
+            active_bank = "bank2"
+        pay_data["activeBank"] = active_bank
+
         try:
             pay_data["expirationMinutes"] = int(payload.expiration_minutes)
         except Exception:
             pay_data["expirationMinutes"] = 15
 
-        pay_data["bank1"] = {
-            "name": payload.banks.sumup.name or "Banque 1",
-            "payToEmail": payload.banks.sumup.pay_to_email.strip(),
-            "apiKey": payload.banks.sumup.api_key.strip(),
-            "clientId": payload.banks.sumup.client_id.strip(),
-            "clientSecret": payload.banks.sumup.client_secret.strip()
-        }
-
-        pay_data["bank2"] = {
-            "name": payload.banks.sumup_bank2.name or "Banque 2",
-            "payToEmail": payload.banks.sumup_bank2.pay_to_email.strip(),
-            "apiKey": payload.banks.sumup_bank2.api_key.strip(),
-            "clientId": payload.banks.sumup_bank2.client_id.strip(),
-            "clientSecret": payload.banks.sumup_bank2.client_secret.strip()
-        }
+        if payload.banks_list:
+            b_list_data = []
+            for b in payload.banks_list:
+                b_dict = {
+                    "id": b.id or "bank1",
+                    "name": b.name or b.id,
+                    "payToEmail": b.pay_to_email.strip(),
+                    "apiKey": b.api_key.strip(),
+                    "clientId": b.client_id.strip(),
+                    "clientSecret": b.client_secret.strip()
+                }
+                b_list_data.append(b_dict)
+                pay_data[b.id] = b_dict
+            pay_data["banks_list"] = b_list_data
+            if len(b_list_data) >= 1:
+                pay_data["bank1"] = b_list_data[0]
+            if len(b_list_data) >= 2:
+                pay_data["bank2"] = b_list_data[1]
+        elif payload.banks:
+            b_sumup = payload.banks.get("sumup", {}) if isinstance(payload.banks, dict) else {}
+            b_sumup2 = payload.banks.get("sumup_bank2", {}) if isinstance(payload.banks, dict) else {}
+            pay_data["bank1"] = {
+                "name": b_sumup.get("name", "Banque 1"),
+                "payToEmail": (b_sumup.get("pay_to_email") or "").strip(),
+                "apiKey": (b_sumup.get("api_key") or "").strip(),
+                "clientId": (b_sumup.get("client_id") or "").strip(),
+                "clientSecret": (b_sumup.get("client_secret") or "").strip()
+            }
+            pay_data["bank2"] = {
+                "name": b_sumup2.get("name", "Banque 2"),
+                "payToEmail": (b_sumup2.get("pay_to_email") or "").strip(),
+                "apiKey": (b_sumup2.get("api_key") or "").strip(),
+                "clientId": (b_sumup2.get("client_id") or "").strip(),
+                "clientSecret": (b_sumup2.get("client_secret") or "").strip()
+            }
 
         await conn.execute(
             "UPDATE settings SET payments = $1 WHERE id = 'global'",
