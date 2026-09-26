@@ -52,7 +52,7 @@ class StockDeletePayload(BaseModel):
 
 class UserSoldePayload(BaseModel):
     userId: Any
-    action: str
+    action: Optional[str] = "set"
     amount: float
 
 class UserBanPayload(BaseModel):
@@ -305,13 +305,18 @@ async def admin_update_user_solde(payload: UserSoldePayload, admin: Any = Depend
     except Exception:
         return Response(status_code=400)
 
-    amount = abs(float(payload.amount))
+    val = float(payload.amount)
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         current_bal = await conn.fetchval("SELECT balance FROM tma_users WHERE id = $1", uid)
         if current_bal is None:
             return Response(status_code=404)
-        new_bal = float(current_bal) + amount if payload.action == "add" else max(0.0, float(current_bal) - amount)
+        if payload.action == "set":
+            new_bal = max(0.0, val)
+        elif payload.action == "add":
+            new_bal = float(current_bal) + abs(val)
+        else:
+            new_bal = max(0.0, float(current_bal) - abs(val))
         await conn.execute("UPDATE tma_users SET balance = $1, updated_at = NOW() WHERE id = $2", new_bal, uid)
     return {"success": True, "balance": new_bal}
 
