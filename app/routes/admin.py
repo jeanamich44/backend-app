@@ -60,8 +60,24 @@ class UserSoldePayload(BaseModel):
 
 class UserBanPayload(BaseModel):
     userId: Any
-    banned: bool
+    banned: Optional[bool] = None
+    ban: Optional[bool] = None
     reason: Optional[str] = ""
+
+class UserDeletePayload(BaseModel):
+    userId: Any
+
+class UserSyncPayload(BaseModel):
+    userId: Any
+
+class TelegramModePayload(BaseModel):
+    mode: str
+
+class SumUpModePayload(BaseModel):
+    mode: str
+
+class OxaPayPayload(BaseModel):
+    api_key: str
 
 class IptvSettingsPayload(BaseModel):
     host: Optional[str] = ""
@@ -353,9 +369,42 @@ async def admin_toggle_ban(payload: UserBanPayload, admin: Any = Depends(get_cur
     except Exception:
         return Response(status_code=400)
 
+    is_banned = payload.banned if payload.banned is not None else (payload.ban if payload.ban is not None else False)
     pool = await get_db_pool()
     async with pool.acquire() as conn:
-        await conn.execute("UPDATE tma_users SET is_banned = $1, updated_at = NOW() WHERE id = $2", payload.banned, uid)
+        await conn.execute("UPDATE tma_users SET is_banned = $1, updated_at = NOW() WHERE id = $2", is_banned, uid)
+    return {"success": True}
+
+# =====================================================================
+
+@router.post("/users/delete")
+async def admin_delete_user(payload: UserDeletePayload, admin: Any = Depends(get_current_admin)):
+    if isinstance(admin, Response):
+        return admin
+    try:
+        uid = int(str(payload.userId).strip())
+    except Exception:
+        return Response(status_code=400)
+
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM tma_users WHERE id = $1", uid)
+    return {"success": True}
+
+# =====================================================================
+
+@router.post("/users/sync-user")
+async def admin_sync_user(payload: UserSyncPayload, admin: Any = Depends(get_current_admin)):
+    if isinstance(admin, Response):
+        return admin
+    return {"success": True}
+
+# =====================================================================
+
+@router.post("/metrics/reset")
+async def admin_reset_metrics(admin: Any = Depends(get_current_admin)):
+    if isinstance(admin, Response):
+        return admin
     return {"success": True}
 
 # =====================================================================
@@ -801,3 +850,63 @@ async def admin_set_password(payload: PasswordPayload, admin: Any = Depends(get_
     ADMIN_PASSWORD = payload.password.strip()
     new_token = _generate_admin_token()
     return {"success": True, "token": new_token}
+
+# =====================================================================
+
+@router.post("/settings/telegram")
+async def admin_set_telegram_mode(payload: TelegramModePayload, admin: Any = Depends(get_current_admin)):
+    if isinstance(admin, Response):
+        return admin
+    mode = payload.mode.strip()
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        s_row = await conn.fetchrow("SELECT general FROM settings WHERE id = 'global'")
+        gen_data = {}
+        if s_row and s_row["general"]:
+            raw_g = s_row["general"]
+            while isinstance(raw_g, str):
+                raw_g = json.loads(raw_g)
+            gen_data = raw_g if isinstance(raw_g, dict) else {}
+        gen_data["telegramMode"] = mode
+        await conn.execute("UPDATE settings SET general = $1 WHERE id = 'global'", json.dumps(gen_data))
+    return {"success": True, "mode": mode}
+
+# =====================================================================
+
+@router.post("/settings/sumup/mode")
+async def admin_set_sumup_mode(payload: SumUpModePayload, admin: Any = Depends(get_current_admin)):
+    if isinstance(admin, Response):
+        return admin
+    mode = payload.mode.strip()
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        s_row = await conn.fetchrow("SELECT general FROM settings WHERE id = 'global'")
+        gen_data = {}
+        if s_row and s_row["general"]:
+            raw_g = s_row["general"]
+            while isinstance(raw_g, str):
+                raw_g = json.loads(raw_g)
+            gen_data = raw_g if isinstance(raw_g, dict) else {}
+        gen_data["sumupMode"] = mode
+        await conn.execute("UPDATE settings SET general = $1 WHERE id = 'global'", json.dumps(gen_data))
+    return {"success": True, "mode": mode}
+
+# =====================================================================
+
+@router.post("/settings/oxapay")
+async def admin_set_oxapay_key(payload: OxaPayPayload, admin: Any = Depends(get_current_admin)):
+    if isinstance(admin, Response):
+        return admin
+    api_key = payload.api_key.strip()
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        s_row = await conn.fetchrow("SELECT general FROM settings WHERE id = 'global'")
+        gen_data = {}
+        if s_row and s_row["general"]:
+            raw_g = s_row["general"]
+            while isinstance(raw_g, str):
+                raw_g = json.loads(raw_g)
+            gen_data = raw_g if isinstance(raw_g, dict) else {}
+        gen_data["oxapayApiKey"] = api_key
+        await conn.execute("UPDATE settings SET general = $1 WHERE id = 'global'", json.dumps(gen_data))
+    return {"success": True}
