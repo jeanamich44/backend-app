@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/payments", tags=["payments"])
 
 class CreatePaymentRequest(BaseModel):
     amount: float = Field(..., ge=1.0, le=60.0)
-    bank: Optional[str] = "bank2"
+    bank: Optional[str] = None
 
 # =====================================================================
 
@@ -25,11 +25,10 @@ async def create_payment(
 ):
     if payload.bank and payload.bank not in ("bank1", "bank2"):
         raise HTTPException(status_code=400, detail="Banque invalide (choix: bank1, bank2)")
-    selected_bank = payload.bank or "bank2"
     result = await create_checkout(
         user_id=user["id"],
         amount=payload.amount,
-        bank_name=selected_bank
+        bank_name=payload.bank
     )
     return result
 

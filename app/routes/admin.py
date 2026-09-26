@@ -617,7 +617,7 @@ async def admin_save_sumup(payload: SumUpSettingsPayload, admin: Any = Depends(g
         try:
             pay_data["expirationMinutes"] = int(payload.expiration_minutes)
         except Exception:
-            pay_data["expirationMinutes"] = 30
+            pay_data["expirationMinutes"] = 15
 
         pay_data["bank1"] = {
             "name": payload.banks.sumup.name or "Banque 1",

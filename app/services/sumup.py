@@ -17,10 +17,7 @@ _token_cache: Dict[str, Tuple[str, float]] = {}
 
 # =====================================================================
 
-async def get_bank_config(bank_name: str) -> Dict[str, str]:
-    if bank_name not in ("bank1", "bank2"):
-        raise HTTPException(status_code=400, detail=f"Banque '{bank_name}' non reconnue")
-
+async def get_payment_settings(requested_bank: Optional[str] = None) -> Tuple[Dict[str, str], int, str]:
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT payments FROM settings WHERE id = 'global'")
@@ -34,6 +31,17 @@ async def get_bank_config(bank_name: str) -> Dict[str, str]:
         if not isinstance(pay_data, dict):
             raise HTTPException(status_code=500, detail="Format JSON payments non conforme")
 
+        active_bank = str(pay_data.get("activeBank") or "bank2").strip()
+        bank_name = requested_bank if requested_bank in ("bank1", "bank2") else active_bank
+
+        raw_exp = pay_data.get("expirationMinutes")
+        try:
+            exp_minutes = int(raw_exp)
+            if exp_minutes <= 0:
+                exp_minutes = 15
+        except (TypeError, ValueError):
+            exp_minutes = 15
+
         bank_obj = pay_data.get(bank_name)
         if not isinstance(bank_obj, dict):
             raise HTTPException(status_code=500, detail=f"Configuration de {bank_name} absente en base")
@@ -46,12 +54,21 @@ async def get_bank_config(bank_name: str) -> Dict[str, str]:
         if not pay_to_email or not client_id or not client_secret:
             raise HTTPException(status_code=500, detail=f"Identifiants {bank_name} incomplets en base")
 
-        return {
+        config = {
             "pay_to_email": str(pay_to_email).strip(),
             "client_id": str(client_id).strip(),
             "client_secret": str(client_secret).strip(),
             "api_key": str(api_key).strip() if api_key else "",
         }
+        return config, exp_minutes, bank_name
+
+# =====================================================================
+
+async def get_bank_config(bank_name: str) -> Dict[str, str]:
+    if bank_name not in ("bank1", "bank2"):
+        raise HTTPException(status_code=400, detail=f"Banque '{bank_name}' non reconnue")
+    config, _, _ = await get_payment_settings(bank_name)
+    return config
 
 # =====================================================================
 
@@ -87,10 +104,12 @@ async def get_sumup_access_token(bank_name: str) -> str:
 async def create_checkout(
     user_id: int,
     amount: float,
-    bank_name: str = "bank2"
+    bank_name: Optional[str] = None
 ) -> Dict[str, Any]:
     if amount < 1.0 or amount > 60.0:
         raise HTTPException(status_code=400, detail="Montant invalide (limite 1€ à 60€)")
+
+    config, exp_minutes, selected_bank = await get_payment_settings(bank_name)
 
     pool = await get_db_pool()
     async with pool.acquire() as conn:
@@ -98,9 +117,10 @@ async def create_checkout(
             """
             UPDATE tma_payments
             SET status = 'EXPIRED', updated_at = NOW()
-            WHERE user_id = $1 AND status = 'PENDING' AND created_at < NOW() - INTERVAL '30 minutes'
+            WHERE user_id = $1 AND status = 'PENDING' AND created_at < NOW() - ($2 * INTERVAL '1 minute')
             """,
-            user_id
+            user_id,
+            exp_minutes
         )
 
         pending = await conn.fetchrow(
@@ -129,16 +149,15 @@ async def create_checkout(
                 detail="Quota atteint"
             )
 
-    config = await get_bank_config(bank_name)
-    token = await get_sumup_access_token(bank_name)
+    token = await get_sumup_access_token(selected_bank)
     ref = str(uuid.uuid4())
 
     backend_base = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("BACKEND_PUBLIC_URL") or "https://backend-app-eas7.onrender.com"
     webhook_url = f"{backend_base.rstrip('/')}/api/payments/webhook"
 
-    valid_until = (datetime.now(timezone.utc) + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    valid_until = (datetime.now(timezone.utc) + timedelta(minutes=exp_minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    print(f"[RENDER SUMUP CREATE] Initialisation checkout: user={user_id}, montant={amount}€, return_url={webhook_url}", flush=True)
+    print(f"[RENDER SUMUP CREATE] Initialisation checkout: user={user_id}, montant={amount}€, expiration={exp_minutes}min, return_url={webhook_url}", flush=True)
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         res = await client.post(
@@ -179,14 +198,15 @@ async def create_checkout(
                 checkout_id,
                 ref,
                 round(float(amount), 2),
-                json.dumps({"bank": bank_name, "created_at": time.time()}),
+                json.dumps({"bank": selected_bank, "created_at": time.time(), "expiration_minutes": exp_minutes}),
             )
 
         return {
             "checkout_id": checkout_id,
             "payment_url": f"{SUMUP_CHECKOUT_PREFIX}{checkout_id}",
             "amount": round(float(amount), 2),
-            "bank": bank_name
+            "bank": selected_bank,
+            "expiration_minutes": exp_minutes
         }
 
 # =====================================================================
@@ -366,15 +386,17 @@ async def verify_checkout(
 # =====================================================================
 
 async def get_pending_checkout(user_id: int) -> Optional[Dict[str, Any]]:
+    _, exp_minutes, _ = await get_payment_settings()
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         await conn.execute(
             """
             UPDATE tma_payments
             SET status = 'EXPIRED', updated_at = NOW()
-            WHERE user_id = $1 AND status = 'PENDING' AND created_at < NOW() - INTERVAL '30 minutes'
+            WHERE user_id = $1 AND status = 'PENDING' AND created_at < NOW() - ($2 * INTERVAL '1 minute')
             """,
-            user_id
+            user_id,
+            exp_minutes
         )
 
         row = await conn.fetchrow(
@@ -400,7 +422,8 @@ async def get_pending_checkout(user_id: int) -> Optional[Dict[str, Any]]:
         "checkout_id": row["checkout_id"],
         "amount": float(row["amount"]),
         "payment_url": f"{SUMUP_CHECKOUT_PREFIX}{row['checkout_id']}",
-        "created_at": row["created_at"].isoformat() if row["created_at"] else None
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "expiration_minutes": exp_minutes
     }
 
 # =====================================================================
