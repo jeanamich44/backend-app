@@ -6,7 +6,9 @@ import hmac
 import hashlib
 import secrets
 import httpx
-from datetime import datetime, timedelta, timezone
+from uuid import UUID
+from decimal import Decimal
+from datetime import datetime, timedelta, timezone, date
 from typing import Dict, Any, Optional, List
 from fastapi import APIRouter, Depends, Header, Response, Request
 from pydantic import BaseModel
@@ -1116,3 +1118,153 @@ async def admin_save_security(payload: SecuritySettingsPayload, admin: Any = Dep
         await conn.execute("UPDATE settings SET security = $1 WHERE id = 'global'", json.dumps(sec_data))
         await settings.load_from_db(conn)
     return {"success": True}
+
+# =====================================================================
+
+def _serialize_db_value(val: Any) -> Any:
+    if val is None:
+        return None
+    if isinstance(val, (datetime, date)):
+        return val.isoformat()
+    if isinstance(val, (Decimal, float)):
+        return float(val)
+    if isinstance(val, UUID):
+        return str(val)
+    if isinstance(val, bytes):
+        return val.hex()
+    if isinstance(val, (dict, list)):
+        return val
+    return val
+
+# =====================================================================
+
+@router.get("/database/tables")
+async def admin_get_database_tables(admin: Any = Depends(get_current_admin)):
+    if isinstance(admin, Response):
+        return admin
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        t_rows = await conn.fetch("""
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+              AND table_type = 'BASE TABLE'
+            ORDER BY table_name ASC;
+        """)
+        tables = []
+        for r in t_rows:
+            tname = r["table_name"]
+            try:
+                cnt = await conn.fetchval(f'SELECT COUNT(*) FROM "{tname}"')
+            except Exception:
+                cnt = 0
+            c_rows = await conn.fetch("""
+                SELECT column_name, data_type, is_nullable, column_default
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = $1
+                ORDER BY ordinal_position ASC;
+            """, tname)
+            tables.append({
+                "name": tname,
+                "count": cnt or 0,
+                "columns": [
+                    {
+                        "name": c["column_name"],
+                        "type": c["data_type"],
+                        "nullable": c["is_nullable"] == "YES",
+                        "default": c["column_default"]
+                    }
+                    for c in c_rows
+                ]
+            })
+        return {"tables": tables}
+
+# =====================================================================
+
+@router.get("/database/query")
+async def admin_query_database_table(
+    table: str,
+    page: int = 1,
+    limit: int = 25,
+    search: Optional[str] = None,
+    sort_col: Optional[str] = None,
+    sort_dir: Optional[str] = "asc",
+    admin: Any = Depends(get_current_admin)
+):
+    if isinstance(admin, Response):
+        return admin
+    clean_table = re.sub(r'[^a-zA-Z0-9_]', '', table)
+    if not clean_table:
+        return Response(status_code=400, content='{"error": "Nom de table invalide"}', media_type="application/json")
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        t_exists = await conn.fetchval("""
+            SELECT 1 FROM information_schema.tables 
+            WHERE table_schema = 'public' AND table_name = $1
+        """, clean_table)
+        if not t_exists:
+            return Response(status_code=404, content='{"error": "Table introuvable"}', media_type="application/json")
+        c_rows = await conn.fetch("""
+            SELECT column_name, data_type, is_nullable, column_default
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = $1
+            ORDER BY ordinal_position ASC;
+        """, clean_table)
+        columns = [
+            {
+                "name": c["column_name"],
+                "type": c["data_type"],
+                "nullable": c["is_nullable"] == "YES",
+                "default": c["column_default"]
+            }
+            for c in c_rows
+        ]
+        col_names = {c["name"] for c in columns}
+        where_clauses = []
+        params = []
+        param_idx = 1
+        if search and search.strip():
+            term = f"%{search.strip()}%"
+            search_conds = []
+            for c in columns:
+                c_type = c["type"].lower()
+                c_name = c["name"]
+                if any(t in c_type for t in ["text", "char", "varchar", "uuid", "json"]):
+                    search_conds.append(f'"{clean_table}"."{c_name}"::text ILIKE ${param_idx}')
+            if search_conds:
+                where_clauses.append("(" + " OR ".join(search_conds) + ")")
+                params.append(term)
+                param_idx += 1
+        where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+        count_sql = f'SELECT COUNT(*) FROM "{clean_table}"{where_sql}'
+        total = await conn.fetchval(count_sql, *params)
+        order_sql = ""
+        if sort_col and sort_col in col_names:
+            direction = "DESC" if str(sort_dir).lower() == "desc" else "ASC"
+            order_sql = f' ORDER BY "{clean_table}"."{sort_col}" {direction}'
+        else:
+            primary_candidates = ["id", "created_at", "createdAt", "updated_at"]
+            for cand in primary_candidates:
+                if cand in col_names:
+                    order_sql = f' ORDER BY "{clean_table}"."{cand}" DESC'
+                    break
+        page = max(1, page)
+        limit = min(max(1, limit), 100)
+        offset = (page - 1) * limit
+        query_sql = f'SELECT * FROM "{clean_table}"{where_sql}{order_sql} LIMIT {limit} OFFSET {offset}'
+        rows = await conn.fetch(query_sql, *params)
+        serialized_rows = []
+        for r in rows:
+            row_dict = {}
+            for col in columns:
+                val = r.get(col["name"])
+                row_dict[col["name"]] = _serialize_db_value(val)
+            serialized_rows.append(row_dict)
+        return {
+            "table": clean_table,
+            "columns": columns,
+            "rows": serialized_rows,
+            "total": total or 0,
+            "page": page,
+            "limit": limit
+        }
