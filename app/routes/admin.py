@@ -70,12 +70,6 @@ class UserDeletePayload(BaseModel):
 class UserSyncPayload(BaseModel):
     userId: Any
 
-class TelegramModePayload(BaseModel):
-    mode: str
-
-class SumUpModePayload(BaseModel):
-    mode: str
-
 class OxaPayPayload(BaseModel):
     api_key: str
 
@@ -663,7 +657,6 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
             "accounts": accounts,
             "panel_accounts": panel_accounts
         },
-        "telegramMode": gen_data.get("telegramMode", "webhook"),
         "sumup": {
             "active": active_b,
             "expiration_minutes": str(pay_data.get("expirationMinutes", 15)),
@@ -960,45 +953,6 @@ async def admin_set_password(payload: PasswordPayload, admin: Any = Depends(get_
 
 # =====================================================================
 
-@router.post("/settings/telegram")
-async def admin_set_telegram_mode(payload: TelegramModePayload, admin: Any = Depends(get_current_admin)):
-    if isinstance(admin, Response):
-        return admin
-    mode = payload.mode.strip()
-    pool = await get_db_pool()
-    async with pool.acquire() as conn:
-        s_row = await conn.fetchrow("SELECT general FROM settings WHERE id = 'global'")
-        gen_data = {}
-        if s_row and s_row["general"]:
-            raw_g = s_row["general"]
-            while isinstance(raw_g, str):
-                raw_g = json.loads(raw_g)
-            gen_data = raw_g if isinstance(raw_g, dict) else {}
-        gen_data["telegramMode"] = mode
-        await conn.execute("UPDATE settings SET general = $1 WHERE id = 'global'", json.dumps(gen_data))
-    return {"success": True, "mode": mode}
-
-# =====================================================================
-
-@router.post("/settings/sumup/mode")
-async def admin_set_sumup_mode(payload: SumUpModePayload, admin: Any = Depends(get_current_admin)):
-    if isinstance(admin, Response):
-        return admin
-    mode = payload.mode.strip()
-    pool = await get_db_pool()
-    async with pool.acquire() as conn:
-        s_row = await conn.fetchrow("SELECT general FROM settings WHERE id = 'global'")
-        gen_data = {}
-        if s_row and s_row["general"]:
-            raw_g = s_row["general"]
-            while isinstance(raw_g, str):
-                raw_g = json.loads(raw_g)
-            gen_data = raw_g if isinstance(raw_g, dict) else {}
-        gen_data["sumupMode"] = mode
-        await conn.execute("UPDATE settings SET general = $1 WHERE id = 'global'", json.dumps(gen_data))
-    return {"success": True, "mode": mode}
-
-# =====================================================================
 
 @router.post("/settings/oxapay")
 async def admin_set_oxapay_key(payload: OxaPayPayload, admin: Any = Depends(get_current_admin)):

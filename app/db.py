@@ -117,7 +117,7 @@ async def init_db() -> asyncpg.Pool:
                 INSERT INTO settings (id, general, payments)
                 VALUES (
                     'global',
-                    '{"botName": "ChezRheyy", "sumupMode": "webhook", "oxapayApiKey": "", "telegramMode": "webhook", "maintenanceMode": false, "supportTelegram": "@RheyySupport"}',
+                    '{"botName": "ChezRheyy", "oxapayApiKey": "", "maintenanceMode": false, "supportTelegram": "@RheyySupport"}',
                     '{"activeBank": "bank1", "paymentEnabled": true, "maxPaymentAmount": 60, "minPaymentAmount": 1, "expirationMinutes": 15, "maxPendingPaymentsPerClient": 1}'
                 )
                 ON CONFLICT (id) DO NOTHING;
