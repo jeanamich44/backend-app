@@ -14,6 +14,7 @@ except Exception:
 
 from app.auth import get_current_user
 from app.db import get_db_pool
+from app.services.iptv_panel import generate_demo_iptv_line
 
 # =====================================================================
 
@@ -346,7 +347,7 @@ async def buy_iptv_subscription(
             raise HTTPException(status_code=400, detail=f"Solde insuffisant ({current_balance:.2f} € requis: {price:.2f} €)")
 
     sep = "&" if "?" in api_url else "?"
-    note_txt = f"TMA_{user_id}_{payload.sub}m"
+    note_txt = f"Achat Bot Telegram: {user_id}"
     target_api = f"{api_url}{sep}action=new&type=m3u&sub={payload.sub}&pack={pack}&country=FR&notes={urllib.parse.quote(note_txt)}&api_key={api_key}"
 
     try:
@@ -480,69 +481,29 @@ async def buy_iptv_demo(user: Dict[str, Any] = Depends(get_current_user)):
         if current_balance < demo_price:
             raise HTTPException(status_code=400, detail=f"Solde insuffisant ({current_balance:.2f} € requis: {demo_price:.2f} €)")
 
-        accounts = config.get("accounts", [])
-        active_acc = next((a for a in accounts if a.get("active")), None)
-        if not active_acc and accounts:
-            active_acc = accounts[0]
-        if not active_acc:
-            logger.error("Aucun compte API IPTV actif configuré")
-            raise HTTPException(status_code=500, detail="Aucun compte API IPTV configuré")
+        panel_accounts = config.get("panel_accounts", [])
+        active_panel = next((p for p in panel_accounts if p.get("active")), None)
+        if not active_panel and panel_accounts:
+            active_panel = panel_accounts[0]
+        if not active_panel:
+            logger.error("Aucun compte panel IPTV actif configuré")
+            raise HTTPException(status_code=500, detail="Aucun compte panel IPTV configuré")
 
-        api_url = (active_acc.get("api_url") or "").strip()
-        api_key = (active_acc.get("api_key") or "").strip()
-        pack = str(active_acc.get("pack") or "").strip()
-        host = config.get("host")
-        if not host or not api_url or not api_key or not pack:
-            logger.error("Paramètres API IPTV incomplets en DB")
-            raise HTTPException(status_code=500, detail="Configuration technique IPTV incomplète")
-
-    sep = "&" if "?" in api_url else "?"
-    note_txt = f"DEMO_{user_id}"
-    target_api = f"{api_url}{sep}action=new&type=m3u&sub=1d&pack={pack}&country=FR&notes={urllib.parse.quote(note_txt)}&api_key={api_key}"
+        host = config.get("host") or "http://cf.business-cloud-neo.com"
 
     try:
-        if AsyncSession is not None:
-            async with AsyncSession(impersonate="chrome146") as session:
-                resp = await session.get(target_api, timeout=30)
-                text = resp.text
-        else:
-            async with httpx.AsyncClient(timeout=30) as session:
-                resp = await session.get(target_api)
-                text = resp.text
+        demo_res = await generate_demo_iptv_line(active_panel, host, user_id)
     except Exception as e:
-        logger.error(f"Échec appel API démo IPTV: {e}")
-        raise HTTPException(status_code=502, detail=f"Échec de génération de la démo : {str(e)}")
+        logger.error(f"Échec génération démo panel IPTV: {e}")
+        raise HTTPException(status_code=502, detail=f"Fournisseur IPTV : {str(e)}")
 
-    try:
-        err_json = json.loads(text)
-        if isinstance(err_json, dict) and err_json.get("status") in ("error", False, "false"):
-            msg = err_json.get("message") or err_json.get("result") or "Erreur API"
-            logger.error(f"Fournisseur IPTV démo a retourné une erreur: {msg}")
-            raise HTTPException(status_code=502, detail=f"Fournisseur IPTV : {msg}")
-    except json.JSONDecodeError:
-        pass
-
-    extracted_url = _extract_url_from_response(text)
-    username = ""
-    password = ""
-    if extracted_url:
-        try:
-            parsed = urllib.parse.urlparse(extracted_url)
-            qs = urllib.parse.parse_qs(parsed.query)
-            username = qs.get("username", [None])[0] or qs.get("user", [None])[0] or ""
-            password = qs.get("password", [None])[0] or qs.get("pass", [None])[0] or ""
-            if not username or not password:
-                parts = parsed.path.strip("/").split("/")
-                if len(parts) >= 3:
-                    if not username:
-                        username = parts[-2]
-                    if not password:
-                        password = parts[-1].split(".")[0]
-        except Exception as e:
-            logger.error(f"Erreur parsing url démo: {e}")
+    username = demo_res.get("username", "")
+    password = demo_res.get("password", "")
+    extracted_url = demo_res.get("url", "")
+    host = demo_res.get("host", host)
 
     if not username or not password:
-        logger.error(f"Identifiants démo introuvables dans la réponse: {text}")
+        logger.error("Identifiants démo introuvables dans la réponse panel")
         raise HTTPException(status_code=502, detail="Impossible d'extraire les identifiants de la démo générée.")
 
     async with pool.acquire() as conn:

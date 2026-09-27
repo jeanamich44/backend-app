@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Header, Response, Request
 from pydantic import BaseModel
 from app.auth import validate_telegram_init_data
 from app.db import get_db_pool
+from app.services.iptv_panel import get_reseller_panel_stats
 
 # =====================================================================
 
@@ -819,13 +820,17 @@ async def admin_test_iptv_panel(admin: Any = Depends(get_current_admin)):
         if not active_panel:
             return {"success": False, "message": "Aucun compte panel configuré"}
 
-    return {
-        "success": True,
-        "stats": {
-            "credits": "Actif",
-            "remaining_demos": "Illimité"
+    try:
+        stats = await get_reseller_panel_stats(active_panel, force_refresh=True)
+        return {
+            "success": True,
+            "stats": stats
         }
-    }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Échec de connexion au panel: {str(e)}"
+        }
 
 # =====================================================================
 
