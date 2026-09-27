@@ -25,9 +25,8 @@ class CarrefourBuyPayload(BaseModel):
     stock_id: Optional[int] = None
 
 class IptvBuyPayload(BaseModel):
-    subscription_type: str = Field(..., pattern="^(m3u|mag)$")
+    subscription_type: str = Field(default="m3u", pattern="^(m3u)$")
     sub: int = Field(..., ge=1, le=12)
-    mac: Optional[str] = None
 
 # =====================================================================
 
@@ -252,15 +251,6 @@ async def buy_iptv_subscription(
     if payload.sub not in (1, 3, 6, 12):
         raise HTTPException(status_code=400, detail="Durée d'abonnement non supportée (1, 3, 6, 12 mois)")
 
-    mac_clean = None
-    if payload.subscription_type == "mag":
-        if not payload.mac:
-            raise HTTPException(status_code=400, detail="L'adresse MAC est obligatoire pour MAG")
-        mac_clean = re.sub(r"[^a-fA-F0-9]", "", payload.mac).upper()
-        if len(mac_clean) != 12:
-            raise HTTPException(status_code=400, detail="Format d'adresse MAC invalide")
-        mac_clean = ":".join([mac_clean[i:i+2] for i in range(0, 12, 2)])
-
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT prices, config FROM services WHERE slug = 'iptv'")
@@ -310,9 +300,7 @@ async def buy_iptv_subscription(
 
     sep = "&" if "?" in api_url else "?"
     note_txt = f"TMA_{user_id}_{payload.sub}m"
-    target_api = f"{api_url}{sep}action=new&type={payload.subscription_type}&sub={payload.sub}&pack={pack}&country=FR&notes={urllib.parse.quote(note_txt)}&api_key={api_key}"
-    if payload.subscription_type == "mag" and mac_clean:
-        target_api += f"&mac={urllib.parse.quote(mac_clean)}"
+    target_api = f"{api_url}{sep}action=new&type=m3u&sub={payload.sub}&pack={pack}&country=FR&notes={urllib.parse.quote(note_txt)}&api_key={api_key}"
 
     try:
         if AsyncSession is not None:
@@ -357,7 +345,7 @@ async def buy_iptv_subscription(
         except Exception:
             pass
 
-    if not username and payload.subscription_type == "m3u":
+    if not username:
         raise HTTPException(status_code=502, detail="Identifiants IPTV non retournés par l'API")
 
     async with pool.acquire() as conn:
@@ -372,17 +360,16 @@ async def buy_iptv_subscription(
             await conn.execute("""
                 INSERT INTO transactions (user_id, brand, code, pin, value, price, notes, created_at)
                 VALUES ($1, 'iptv', $2, $3, $4, $5, $6, NOW())
-            """, user_id, username or mac_clean or "Abonnement", password or "Actif", payload.sub, price, extracted_url or "")
+            """, user_id, username or "Abonnement", password or "Actif", payload.sub, price, extracted_url or "")
 
     return {
         "success": True,
         "username": username,
         "password": password,
-        "mac": mac_clean,
         "host": host,
         "url": extracted_url or f"{host}/get.php?username={username}&password={password}&type=m3u_plus&output=ts",
         "sub": payload.sub,
-        "subscription_type": payload.subscription_type,
+        "subscription_type": "m3u",
         "price": price,
         "new_balance": new_balance
     }
