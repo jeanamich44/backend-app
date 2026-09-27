@@ -10,7 +10,7 @@ db_pool: Optional[asyncpg.Pool] = None
 # =====================================================================
 
 def _get_ssl_context() -> Optional[ssl.SSLContext]:
-    if "railway" in settings.database_url or "proxy.rlwy.net" in settings.database_url or "aivencloud" in settings.database_url or "sslmode=require" in settings.database_url:
+    if "aivencloud" in settings.database_url or "sslmode=require" in settings.database_url:
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
