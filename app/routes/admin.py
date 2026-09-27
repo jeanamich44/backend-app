@@ -205,43 +205,133 @@ async def admin_stats(admin: Any = Depends(get_current_admin)):
         return admin
 
     pool = await get_db_pool()
-    stats = {
-        "users_count": 0,
-        "payments_count": 0,
-        "payments_volume": 0.0,
-        "stock_count": 0,
-        "generations_count": 0,
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
+    total_users = 0
+    total_payments = 0
+    total_payments_vol = 0.0
+    total_stock = 0
+    total_transactions = 0
+    total_sales_vol = 0.0
+    gen_count = 0
+    recent_sales = []
+    recent_payments = []
+    maintenance_mode = False
 
     async with pool.acquire() as conn:
         try:
             u_row = await conn.fetchval("SELECT COUNT(*) FROM tma_users")
-            stats["users_count"] = int(u_row or 0)
+            total_users = int(u_row or 0)
         except Exception:
             pass
 
         try:
             p_row = await conn.fetchrow("SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM tma_payments WHERE status = 'PAID'")
             if p_row:
-                stats["payments_count"] = int(p_row[0] or 0)
-                stats["payments_volume"] = float(p_row[1] or 0.0)
+                total_payments = int(p_row[0] or 0)
+                total_payments_vol = float(p_row[1] or 0.0)
         except Exception:
             pass
 
         try:
             s_row = await conn.fetchval("SELECT COUNT(*) FROM stock WHERE brand = 'carr' AND is_sold = FALSE")
-            stats["stock_count"] = int(s_row or 0)
+            total_stock = int(s_row or 0)
+        except Exception:
+            pass
+
+        try:
+            t_row = await conn.fetchrow("SELECT COUNT(*), COALESCE(SUM(price), 0) FROM transactions")
+            if t_row:
+                total_transactions = int(t_row[0] or 0)
+                total_sales_vol = float(t_row[1] or 0.0)
         except Exception:
             pass
 
         try:
             g_row = await conn.fetchval("SELECT COUNT(*) FROM tma_generations")
-            stats["generations_count"] = int(g_row or 0)
+            gen_count = int(g_row or 0)
         except Exception:
             pass
 
-    return stats
+        try:
+            tx_rows = await conn.fetch("SELECT id, user_id, brand, price, created_at FROM transactions ORDER BY created_at DESC LIMIT 10")
+            recent_sales = [
+                {
+                    "id": row["id"],
+                    "userId": str(row["user_id"]),
+                    "brand": row["brand"],
+                    "price": float(row["price"] or 0),
+                    "createdAt": row["created_at"].isoformat() if row["created_at"] else ""
+                }
+                for row in tx_rows
+            ]
+        except Exception:
+            pass
+
+        try:
+            pm_rows = await conn.fetch("SELECT id, user_id, checkout_id, amount, status, created_at FROM tma_payments ORDER BY created_at DESC LIMIT 10")
+            recent_payments = [
+                {
+                    "id": str(row["id"]),
+                    "chatId": str(row["user_id"]),
+                    "trackId": row["checkout_id"] or "N/A",
+                    "amount": float(row["amount"] or 0),
+                    "method": "CB",
+                    "status": row["status"] or "PAID",
+                    "createdAt": row["created_at"].isoformat() if row["created_at"] else ""
+                }
+                for row in pm_rows
+            ]
+        except Exception:
+            pass
+
+        try:
+            s_row = await conn.fetchrow("SELECT general FROM settings WHERE id = 'global'")
+            if s_row and s_row["general"]:
+                raw_g = s_row["general"]
+                while isinstance(raw_g, str):
+                    raw_g = json.loads(raw_g)
+                if isinstance(raw_g, dict):
+                    maintenance_mode = bool(raw_g.get("maintenanceMode", False))
+        except Exception:
+            pass
+
+    total_ca = total_payments_vol if total_payments_vol > 0 else total_sales_vol
+    total_sales = total_transactions if total_transactions > 0 else total_payments
+
+    metrics = {
+        "telegramReceived": 0,
+        "telegramSent": 0,
+        "sumupReceived": total_payments,
+        "sumupSent": 0,
+        "oxapayReceived": 0,
+        "oxapaySent": 0,
+        "commandsExecuted": 0,
+        "errorsCount": 0,
+        "adminLogins": 1
+    }
+
+    graph = {
+        "today": [{"label": f"{h:02d}h-{(h+2):02d}h", "volume": 0} for h in range(0, 24, 2)],
+        "days7": [{"label": f"J-{i}", "volume": 0} for i in range(6, -1, -1)],
+        "days30": [{"label": f"J-{i}", "volume": 0} for i in range(29, -1, -1)]
+    }
+
+    return {
+        "totalCa": float(total_ca),
+        "totalSales": int(total_sales),
+        "totalUsers": int(total_users),
+        "totalStock": int(total_stock),
+        "recentSales": recent_sales,
+        "recentPayments": recent_payments,
+        "maintenance": maintenance_mode,
+        "metrics": metrics,
+        "graph": graph,
+        "users_count": int(total_users),
+        "payments_count": int(total_sales),
+        "payments_volume": float(total_ca),
+        "stock_count": int(total_stock),
+        "generations_count": int(gen_count),
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
 
 # =====================================================================
 
@@ -311,26 +401,30 @@ async def admin_clear_stock(admin: Any = Depends(get_current_admin)):
 async def admin_get_users(admin: Any = Depends(get_current_admin)):
     if isinstance(admin, Response):
         return admin
-    pool = await get_db_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT u.id, u.username, u.first_name, u.balance, u.is_banned, u.created_at,
-                   COALESCE((SELECT COUNT(*) FROM tma_payments WHERE user_id = u.id AND status = 'PAID'), 0) as achats
-            FROM tma_users u
-            ORDER BY u.created_at DESC
-        """)
-        users = [
-            {
-                "id": str(row["id"]),
-                "userNumber": idx + 1,
-                "username": row["username"] or row["first_name"] or "Anonyme",
-                "solde": float(row["balance"] or 0),
-                "isBanned": bool(row["is_banned"]),
-                "achats": int(row["achats"] or 0)
-            }
-            for idx, row in enumerate(rows)
-        ]
-    return {"users": users}
+    try:
+        pool = await get_db_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT u.id, u.username, u.first_name, u.balance, u.is_banned, u.created_at,
+                       COALESCE((SELECT COUNT(*) FROM tma_payments WHERE user_id = u.id AND status = 'PAID'), 0) as achats
+                FROM tma_users u
+                ORDER BY u.created_at DESC
+            """)
+            users = [
+                {
+                    "id": str(row["id"]),
+                    "userNumber": idx + 1,
+                    "username": row["username"] or row["first_name"] or "Anonyme",
+                    "solde": float(row["balance"] or 0),
+                    "isBanned": bool(row["is_banned"]),
+                    "achats": int(row["achats"] or 0)
+                }
+                for idx, row in enumerate(rows)
+            ]
+        return {"users": users}
+    except Exception as e:
+        import traceback
+        return Response(content=json.dumps({"error": str(e), "trace": traceback.format_exc()}), status_code=500, media_type="application/json")
 
 # =====================================================================
 
@@ -441,29 +535,33 @@ async def admin_get_payments(admin: Any = Depends(get_current_admin)):
 async def admin_get_transactions(admin: Any = Depends(get_current_admin)):
     if isinstance(admin, Response):
         return admin
-    pool = await get_db_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT id, user_id, amount, status, checkout_id, created_at
-            FROM tma_payments
-            WHERE status = 'PAID'
-            ORDER BY created_at DESC
-            LIMIT 200
-        """)
-        txs = [
-            {
-                "id": str(row["id"]),
-                "userId": str(row["user_id"]),
-                "brand": "Rechargement CB",
-                "code": row["checkout_id"] or "N/A",
-                "price": float(row["amount"] or 0),
-                "valeur": float(row["amount"] or 0),
-                "status": row["status"],
-                "createdAt": row["created_at"].isoformat() if row["created_at"] else ""
-            }
-            for row in rows
-        ]
-    return {"transactions": txs}
+    try:
+        pool = await get_db_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT id, user_id, amount, status, checkout_id, created_at
+                FROM tma_payments
+                WHERE status = 'PAID'
+                ORDER BY created_at DESC
+                LIMIT 200
+            """)
+            txs = [
+                {
+                    "id": str(row["id"]),
+                    "userId": str(row["user_id"]),
+                    "brand": "Rechargement CB",
+                    "code": row["checkout_id"] or "N/A",
+                    "price": float(row["amount"] or 0),
+                    "valeur": float(row["amount"] or 0),
+                    "status": row["status"],
+                    "createdAt": row["created_at"].isoformat() if row["created_at"] else ""
+                }
+                for row in rows
+            ]
+        return {"transactions": txs}
+    except Exception as e:
+        import traceback
+        return Response(content=json.dumps({"error": str(e), "trace": traceback.format_exc()}), status_code=500, media_type="application/json")
 
 # =====================================================================
 

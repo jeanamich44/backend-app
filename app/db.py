@@ -10,7 +10,7 @@ db_pool: Optional[asyncpg.Pool] = None
 # =====================================================================
 
 def _get_ssl_context() -> Optional[ssl.SSLContext]:
-    if "railway" in settings.database_url or "proxy.rlwy.net" in settings.database_url:
+    if "railway" in settings.database_url or "proxy.rlwy.net" in settings.database_url or "aivencloud" in settings.database_url or "sslmode=require" in settings.database_url:
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
@@ -32,6 +32,8 @@ async def init_db() -> asyncpg.Pool:
         )
         async with db_pool.acquire() as conn:
             await conn.execute("""
+                CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
                 CREATE TABLE IF NOT EXISTS stock (
                     id SERIAL PRIMARY KEY,
                     brand TEXT NOT NULL DEFAULT 'carr',
@@ -42,6 +44,83 @@ async def init_db() -> asyncpg.Pool:
                     is_sold BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 );
+
+                CREATE TABLE IF NOT EXISTS transactions (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    brand TEXT NOT NULL,
+                    code TEXT,
+                    pin TEXT,
+                    value NUMERIC DEFAULT 0,
+                    price NUMERIC NOT NULL,
+                    notes TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS tma_users (
+                    id BIGINT PRIMARY KEY,
+                    username VARCHAR(255),
+                    first_name VARCHAR(255),
+                    last_name VARCHAR(255),
+                    balance NUMERIC DEFAULT 0.0,
+                    is_banned BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                );
+
+                ALTER TABLE tma_users ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0.0;
+                ALTER TABLE tma_users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT FALSE;
+
+                CREATE TABLE IF NOT EXISTS tma_payments (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id BIGINT,
+                    checkout_id VARCHAR(255),
+                    checkout_reference VARCHAR(255),
+                    amount NUMERIC DEFAULT 0.0,
+                    currency VARCHAR(10) DEFAULT 'EUR',
+                    status VARCHAR(50) DEFAULT 'PENDING',
+                    sumup_payload JSONB,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS tma_generations (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id BIGINT,
+                    category VARCHAR(100),
+                    slug VARCHAR(100),
+                    cost NUMERIC DEFAULT 0.0,
+                    status VARCHAR(50) DEFAULT 'COMPLETED',
+                    metadata JSONB,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS settings (
+                    id TEXT PRIMARY KEY,
+                    general JSONB,
+                    payments JSONB,
+                    security JSONB,
+                    admin JSONB
+                );
+
+                CREATE TABLE IF NOT EXISTS services (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    slug TEXT UNIQUE,
+                    name TEXT,
+                    description TEXT,
+                    prices JSONB,
+                    config JSONB,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+
+                INSERT INTO settings (id, general, payments)
+                VALUES (
+                    'global',
+                    '{"botName": "ChezRheyy", "sumupMode": "webhook", "oxapayApiKey": "", "telegramMode": "webhook", "maintenanceMode": false, "supportTelegram": "@RheyySupport"}',
+                    '{"activeBank": "bank1", "paymentEnabled": true, "maxPaymentAmount": 60, "minPaymentAmount": 1, "expirationMinutes": 15, "maxPendingPaymentsPerClient": 1}'
+                )
+                ON CONFLICT (id) DO NOTHING;
             """)
     return db_pool
 

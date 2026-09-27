@@ -6,6 +6,7 @@ from app.db import init_db, close_db
 from app.routes.user import router as user_router
 from app.routes.payments import router as payments_router
 from app.routes.admin import router as admin_router
+from app.routes.client_services import router as client_services_router
 from app.middleware import RequestDecompressionMiddleware
 
 # =====================================================================
@@ -60,3 +61,4 @@ async def health():
 app.include_router(user_router)
 app.include_router(payments_router)
 app.include_router(admin_router)
+app.include_router(client_services_router)
