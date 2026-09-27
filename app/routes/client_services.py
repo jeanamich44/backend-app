@@ -249,10 +249,10 @@ async def get_iptv_public_prices(user: Dict[str, Any] = Depends(get_current_user
             raise HTTPException(status_code=500, detail="Statut démo IPTV invalide en base de données")
 
         try:
-            p1 = float(str(prices.get("price_1m") or prices.get("m3u_1_mois")).replace(",", "."))
-            p3 = float(str(prices.get("price_3m") or prices.get("m3u_3_mois")).replace(",", "."))
-            p6 = float(str(prices.get("price_6m") or prices.get("m3u_6_mois")).replace(",", "."))
-            p12 = float(str(prices.get("price_12m") or prices.get("m3u_12_mois")).replace(",", "."))
+            p1 = float(str(prices.get("price_1m")).replace(",", "."))
+            p3 = float(str(prices.get("price_3m")).replace(",", "."))
+            p6 = float(str(prices.get("price_6m")).replace(",", "."))
+            p12 = float(str(prices.get("price_12m")).replace(",", "."))
             if p1 <= 0 or p3 <= 0 or p6 <= 0 or p12 <= 0:
                 raise ValueError("Un tarif IPTV est inférieur ou égal à 0")
         except Exception as e:
@@ -324,10 +324,10 @@ async def buy_iptv_subscription(
 
         try:
             price_map = {
-                1: float(str(prices.get("price_1m") or prices.get("m3u_1_mois")).replace(",", ".")),
-                3: float(str(prices.get("price_3m") or prices.get("m3u_3_mois")).replace(",", ".")),
-                6: float(str(prices.get("price_6m") or prices.get("m3u_6_mois")).replace(",", ".")),
-                12: float(str(prices.get("price_12m") or prices.get("m3u_12_mois")).replace(",", "."))
+                1: float(str(prices.get("price_1m")).replace(",", ".")),
+                3: float(str(prices.get("price_3m")).replace(",", ".")),
+                6: float(str(prices.get("price_6m")).replace(",", ".")),
+                12: float(str(prices.get("price_12m")).replace(",", "."))
             }
             if price_map[payload.sub] <= 0:
                 raise ValueError("Tarif sélectionné inférieur ou égal à 0")
@@ -498,7 +498,7 @@ async def buy_iptv_demo(user: Dict[str, Any] = Depends(get_current_user)):
 
     sep = "&" if "?" in api_url else "?"
     note_txt = f"DEMO_{user_id}"
-    target_api = f"{api_url}{sep}action=new&type=m3u&sub=0&pack={pack}&country=FR&notes={urllib.parse.quote(note_txt)}&api_key={api_key}"
+    target_api = f"{api_url}{sep}action=new&type=m3u&sub=1d&pack={pack}&country=FR&notes={urllib.parse.quote(note_txt)}&api_key={api_key}"
 
     try:
         if AsyncSession is not None:
@@ -510,7 +510,17 @@ async def buy_iptv_demo(user: Dict[str, Any] = Depends(get_current_user)):
                 resp = await session.get(target_api)
                 text = resp.text
     except Exception as e:
+        logger.error(f"Échec appel API démo IPTV: {e}")
         raise HTTPException(status_code=502, detail=f"Échec de génération de la démo : {str(e)}")
+
+    try:
+        err_json = json.loads(text)
+        if isinstance(err_json, dict) and err_json.get("status") in ("error", False, "false"):
+            msg = err_json.get("message") or err_json.get("result") or "Erreur API"
+            logger.error(f"Fournisseur IPTV démo a retourné une erreur: {msg}")
+            raise HTTPException(status_code=502, detail=f"Fournisseur IPTV : {msg}")
+    except json.JSONDecodeError:
+        pass
 
     extracted_url = _extract_url_from_response(text)
     username = ""
@@ -528,8 +538,12 @@ async def buy_iptv_demo(user: Dict[str, Any] = Depends(get_current_user)):
                         username = parts[-2]
                     if not password:
                         password = parts[-1].split(".")[0]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Erreur parsing url démo: {e}")
+
+    if not username or not password:
+        logger.error(f"Identifiants démo introuvables dans la réponse: {text}")
+        raise HTTPException(status_code=502, detail="Impossible d'extraire les identifiants de la démo générée.")
 
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -538,15 +552,14 @@ async def buy_iptv_demo(user: Dict[str, Any] = Depends(get_current_user)):
             await conn.execute("""
                 INSERT INTO transactions (user_id, brand, code, pin, value, price, notes, created_at)
                 VALUES ($1, 'iptv', $2, $3, 0, $4, $5, NOW())
-            """, user_id, username or "Demo", password or "24h", demo_price, extracted_url or "")
+            """, user_id, username, password, demo_price, extracted_url or "")
             new_bal_row = await conn.fetchval("SELECT balance FROM tma_users WHERE id = $1", user_id)
 
     return {
         "success": True,
-        "username": username or "demo",
-        "password": password or "demo",
+        "username": username,
+        "password": password,
         "host": host,
-        "url": extracted_url or f"{host}/get.php?username={username}&password={password}&type=m3u_plus&output=ts",
         "duration": "24h",
         "price": demo_price,
         "new_balance": float(new_bal_row or 0)

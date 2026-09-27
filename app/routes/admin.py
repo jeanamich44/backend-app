@@ -648,10 +648,10 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
             "host": iptv_config.get("host") or "http://cf.business-cloud-neo.com",
             "type": iptv_config.get("type", "m3u"),
             "message_footer": iptv_config.get("message_footer", ""),
-            "price_1m": str(iptv_prices.get("price_1m") or iptv_prices.get("m3u_1_mois") or 5),
-            "price_3m": str(iptv_prices.get("price_3m") or iptv_prices.get("m3u_3_mois") or 10),
-            "price_6m": str(iptv_prices.get("price_6m") or iptv_prices.get("m3u_6_mois") or 20),
-            "price_12m": str(iptv_prices.get("price_12m") or iptv_prices.get("m3u_12_mois") or 35),
+            "price_1m": str(iptv_prices.get("price_1m", "")),
+            "price_3m": str(iptv_prices.get("price_3m", "")),
+            "price_6m": str(iptv_prices.get("price_6m", "")),
+            "price_12m": str(iptv_prices.get("price_12m", "")),
             "price_demo": str(iptv_prices.get("price_demo", "")),
             "demo_enabled": bool(iptv_config.get("demo_enabled", True)),
             "accounts": accounts,
@@ -709,14 +709,11 @@ async def admin_save_iptv(payload: IptvSettingsPayload, admin: Any = Depends(get
         prices["price_3m"] = float(payload.price_3m or 25)
         prices["price_6m"] = float(payload.price_6m or 45)
         prices["price_12m"] = float(payload.price_12m or 70)
-        prices["m3u_1_mois"] = prices["price_1m"]
-        prices["m3u_3_mois"] = prices["price_3m"]
-        prices["m3u_6_mois"] = prices["price_6m"]
-        prices["m3u_12_mois"] = prices["price_12m"]
+        for legacy_k in ("m3u_1_mois", "m3u_3_mois", "m3u_6_mois", "m3u_12_mois", "demo"):
+            prices.pop(legacy_k, None)
         if payload.price_demo is not None:
             demo_val = float(str(payload.price_demo).replace(",", "."))
             prices["price_demo"] = demo_val
-            prices.pop("demo", None)
 
         config["host"] = payload.host or ""
         config["type"] = payload.type or "m3u"
