@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import urllib.parse
 from typing import Dict, Any, Optional
@@ -16,6 +17,7 @@ from app.db import get_db_pool
 
 # =====================================================================
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["client_services"])
 
 # =====================================================================
@@ -201,31 +203,66 @@ async def get_iptv_public_prices(user: Dict[str, Any] = Depends(get_current_user
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT prices, config FROM services WHERE slug = 'iptv'")
+        if not row:
+            logger.error("Service IPTV introuvable en DB dans services")
+            raise HTTPException(status_code=500, detail="Configuration IPTV non disponible")
+
         prices = {}
         config = {}
-        if row:
-            if row["prices"]:
-                raw_p = row["prices"]
-                while isinstance(raw_p, str):
-                    raw_p = json.loads(raw_p)
-                prices = raw_p if isinstance(raw_p, dict) else {}
-            if row["config"]:
-                raw_c = row["config"]
-                while isinstance(raw_c, str):
-                    raw_c = json.loads(raw_c)
-                config = raw_c if isinstance(raw_c, dict) else {}
+        if row["prices"]:
+            raw_p = row["prices"]
+            while isinstance(raw_p, str):
+                raw_p = json.loads(raw_p)
+            prices = raw_p if isinstance(raw_p, dict) else {}
+        if row["config"]:
+            raw_c = row["config"]
+            while isinstance(raw_c, str):
+                raw_c = json.loads(raw_c)
+            config = raw_c if isinstance(raw_c, dict) else {}
 
-        demo_on_raw = str(config.get("demo_enabled", "true")).lower()
-        demo_enabled = demo_on_raw in ("true", "1", "on")
+        raw_price_demo = prices.get("price_demo")
+        if raw_price_demo is None:
+            logger.error("iptv.price_demo manquant en DB dans services.prices")
+            raise HTTPException(status_code=500, detail="Tarif démo IPTV manquant en base de données")
+
         try:
-            demo_price = float(str(prices.get("price_demo") or prices.get("demo") or config.get("price_demo") or "1").replace(",", "."))
-        except Exception:
-            demo_price = 1.0
+            demo_price = float(str(raw_price_demo).replace(",", "."))
+            if demo_price <= 0:
+                logger.error(f"iptv.price_demo invalide ou <= 0 en DB: {raw_price_demo}")
+                raise ValueError("Tarif démo inférieur ou égal à 0")
+        except Exception as e:
+            logger.error(f"Erreur conversion iptv.price_demo ({raw_price_demo}): {e}")
+            raise HTTPException(status_code=500, detail="Tarif démo IPTV invalide en base de données")
 
-        p1 = float(str(prices.get("price_1m") or prices.get("m3u_1_mois") or 5).replace(",", "."))
-        p3 = float(str(prices.get("price_3m") or prices.get("m3u_3_mois") or 10).replace(",", "."))
-        p6 = float(str(prices.get("price_6m") or prices.get("m3u_6_mois") or 20).replace(",", "."))
-        p12 = float(str(prices.get("price_12m") or prices.get("m3u_12_mois") or 35).replace(",", "."))
+        raw_demo_enabled = config.get("demo_enabled")
+        if raw_demo_enabled is None:
+            logger.error("iptv.demo_enabled manquant en DB dans services.config")
+            raise HTTPException(status_code=500, detail="Statut démo IPTV manquant en base de données")
+
+        demo_on_raw = str(raw_demo_enabled).strip().lower()
+        if demo_on_raw in ("true", "1", "on"):
+            demo_enabled = True
+        elif demo_on_raw in ("false", "0", "off"):
+            demo_enabled = False
+        else:
+            logger.error(f"iptv.demo_enabled invalide en DB: {raw_demo_enabled}")
+            raise HTTPException(status_code=500, detail="Statut démo IPTV invalide en base de données")
+
+        try:
+            p1 = float(str(prices.get("price_1m") or prices.get("m3u_1_mois")).replace(",", "."))
+            p3 = float(str(prices.get("price_3m") or prices.get("m3u_3_mois")).replace(",", "."))
+            p6 = float(str(prices.get("price_6m") or prices.get("m3u_6_mois")).replace(",", "."))
+            p12 = float(str(prices.get("price_12m") or prices.get("m3u_12_mois")).replace(",", "."))
+            if p1 <= 0 or p3 <= 0 or p6 <= 0 or p12 <= 0:
+                raise ValueError("Un tarif IPTV est inférieur ou égal à 0")
+        except Exception as e:
+            logger.error(f"Tarifs IPTV manquants ou invalides en DB: {e}")
+            raise HTTPException(status_code=500, detail="Tarifs IPTV non configurés ou invalides en base de données")
+
+        host = config.get("host")
+        if not host:
+            logger.error("iptv.host manquant en DB dans services.config")
+            raise HTTPException(status_code=500, detail="Host IPTV manquant en base de données")
 
         return {
             "prices": {
@@ -236,7 +273,7 @@ async def get_iptv_public_prices(user: Dict[str, Any] = Depends(get_current_user
                 "demo": demo_price
             },
             "demo_enabled": demo_enabled,
-            "host": config.get("host") or "http://cf.business-cloud-neo.com",
+            "host": host,
             "message_footer": config.get("message_footer", "")
         }
 
@@ -280,14 +317,24 @@ async def buy_iptv_subscription(
         api_url = (active_acc.get("api_url") or "").strip()
         api_key = (active_acc.get("api_key") or "").strip()
         pack = str(active_acc.get("pack") or "47013").strip()
-        host = config.get("host") or "http://cf.business-cloud-neo.com"
+        host = config.get("host")
+        if not host:
+            logger.error("iptv.host manquant en DB dans services.config")
+            raise HTTPException(status_code=500, detail="Host IPTV manquant en base de données")
 
-        price_map = {
-            1: float(str(prices.get("price_1m") or prices.get("m3u_1_mois") or 5).replace(",", ".")),
-            3: float(str(prices.get("price_3m") or prices.get("m3u_3_mois") or 10).replace(",", ".")),
-            6: float(str(prices.get("price_6m") or prices.get("m3u_6_mois") or 20).replace(",", ".")),
-            12: float(str(prices.get("price_12m") or prices.get("m3u_12_mois") or 35).replace(",", "."))
-        }
+        try:
+            price_map = {
+                1: float(str(prices.get("price_1m") or prices.get("m3u_1_mois")).replace(",", ".")),
+                3: float(str(prices.get("price_3m") or prices.get("m3u_3_mois")).replace(",", ".")),
+                6: float(str(prices.get("price_6m") or prices.get("m3u_6_mois")).replace(",", ".")),
+                12: float(str(prices.get("price_12m") or prices.get("m3u_12_mois")).replace(",", "."))
+            }
+            if price_map[payload.sub] <= 0:
+                raise ValueError("Tarif sélectionné inférieur ou égal à 0")
+        except Exception as e:
+            logger.error(f"Tarifs IPTV manquants ou invalides en DB: {e}")
+            raise HTTPException(status_code=500, detail="Tarifs IPTV non configurés ou invalides en base de données")
+
         price = price_map[payload.sub]
 
         user_row = await conn.fetchrow("SELECT balance FROM tma_users WHERE id = $1 FOR UPDATE", user_id)
@@ -399,32 +446,55 @@ async def buy_iptv_demo(user: Dict[str, Any] = Depends(get_current_user)):
                 raw_c = json.loads(raw_c)
             config = raw_c if isinstance(raw_c, dict) else {}
 
-        demo_on_raw = str(config.get("demo_enabled", "true")).lower()
+        raw_demo_enabled = config.get("demo_enabled")
+        if raw_demo_enabled is None:
+            logger.error("iptv.demo_enabled manquant en DB dans services.config")
+            raise HTTPException(status_code=500, detail="Statut démo IPTV non configuré en base de données")
+
+        demo_on_raw = str(raw_demo_enabled).strip().lower()
         if demo_on_raw not in ("true", "1", "on"):
+            if demo_on_raw not in ("false", "0", "off"):
+                logger.error(f"iptv.demo_enabled valeur non reconnue en DB: {raw_demo_enabled}")
             raise HTTPException(status_code=400, detail="Les tests démo IPTV sont actuellement désactivés")
 
-        try:
-            demo_price = float(str(prices.get("price_demo") or prices.get("demo") or config.get("price_demo") or "1").replace(",", "."))
-        except Exception:
-            demo_price = 1.0
+        raw_price_demo = prices.get("price_demo")
+        if raw_price_demo is None:
+            logger.error("iptv.price_demo manquant en DB dans services.prices")
+            raise HTTPException(status_code=500, detail="Tarif démo IPTV manquant en base de données")
 
-        if demo_price > 0:
-            user_row = await conn.fetchrow("SELECT balance FROM tma_users WHERE id = $1 FOR UPDATE", user_id)
-            current_balance = float(user_row["balance"] or 0)
-            if current_balance < demo_price:
-                raise HTTPException(status_code=400, detail=f"Solde insuffisant ({current_balance:.2f} € requis: {demo_price:.2f} €)")
+        try:
+            demo_price = float(str(raw_price_demo).replace(",", "."))
+            if demo_price <= 0:
+                logger.error(f"iptv.price_demo <= 0 en DB: {raw_price_demo}")
+                raise ValueError("Tarif démo inférieur ou égal à 0")
+        except Exception as e:
+            logger.error(f"iptv.price_demo invalide en DB ({raw_price_demo}): {e}")
+            raise HTTPException(status_code=500, detail="Tarif démo IPTV invalide en base de données")
+
+        user_row = await conn.fetchrow("SELECT balance FROM tma_users WHERE id = $1 FOR UPDATE", user_id)
+        if not user_row:
+            logger.error(f"Utilisateur {user_id} introuvable en DB lors de buy-demo")
+            raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+
+        current_balance = float(user_row["balance"] or 0)
+        if current_balance < demo_price:
+            raise HTTPException(status_code=400, detail=f"Solde insuffisant ({current_balance:.2f} € requis: {demo_price:.2f} €)")
 
         accounts = config.get("accounts", [])
         active_acc = next((a for a in accounts if a.get("active")), None)
         if not active_acc and accounts:
             active_acc = accounts[0]
         if not active_acc:
+            logger.error("Aucun compte API IPTV actif configuré")
             raise HTTPException(status_code=500, detail="Aucun compte API IPTV configuré")
 
         api_url = (active_acc.get("api_url") or "").strip()
         api_key = (active_acc.get("api_key") or "").strip()
-        pack = str(active_acc.get("pack") or "47013").strip()
-        host = config.get("host") or "http://cf.business-cloud-neo.com"
+        pack = str(active_acc.get("pack") or "").strip()
+        host = config.get("host")
+        if not host or not api_url or not api_key or not pack:
+            logger.error("Paramètres API IPTV incomplets en DB")
+            raise HTTPException(status_code=500, detail="Configuration technique IPTV incomplète")
 
     sep = "&" if "?" in api_url else "?"
     note_txt = f"DEMO_{user_id}"
