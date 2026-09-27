@@ -218,9 +218,9 @@ async def get_iptv_public_prices(user: Dict[str, Any] = Depends(get_current_user
         demo_on_raw = str(config.get("demo_enabled", "true")).lower()
         demo_enabled = demo_on_raw in ("true", "1", "on")
         try:
-            demo_price = float(str(config.get("price_demo", "0")).replace(",", "."))
+            demo_price = float(str(prices.get("price_demo") or prices.get("demo") or config.get("price_demo") or "1").replace(",", "."))
         except Exception:
-            demo_price = 0.0
+            demo_price = 1.0
 
         p1 = float(str(prices.get("price_1m") or prices.get("m3u_1_mois") or 5).replace(",", "."))
         p3 = float(str(prices.get("price_3m") or prices.get("m3u_3_mois") or 10).replace(",", "."))
@@ -385,6 +385,13 @@ async def buy_iptv_demo(user: Dict[str, Any] = Depends(get_current_user)):
         if not row:
             raise HTTPException(status_code=500, detail="Configuration IPTV non disponible")
 
+        prices = {}
+        if row["prices"]:
+            raw_p = row["prices"]
+            while isinstance(raw_p, str):
+                raw_p = json.loads(raw_p)
+            prices = raw_p if isinstance(raw_p, dict) else {}
+
         config = {}
         if row["config"]:
             raw_c = row["config"]
@@ -397,9 +404,9 @@ async def buy_iptv_demo(user: Dict[str, Any] = Depends(get_current_user)):
             raise HTTPException(status_code=400, detail="Les tests démo IPTV sont actuellement désactivés")
 
         try:
-            demo_price = float(str(config.get("price_demo", "0")).replace(",", "."))
+            demo_price = float(str(prices.get("price_demo") or prices.get("demo") or config.get("price_demo") or "1").replace(",", "."))
         except Exception:
-            demo_price = 0.0
+            demo_price = 1.0
 
         if demo_price > 0:
             user_row = await conn.fetchrow("SELECT balance FROM tma_users WHERE id = $1 FOR UPDATE", user_id)

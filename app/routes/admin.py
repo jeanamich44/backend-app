@@ -87,6 +87,8 @@ class IptvSettingsPayload(BaseModel):
     price_3m: Optional[str] = "25"
     price_6m: Optional[str] = "45"
     price_12m: Optional[str] = "70"
+    price_demo: Optional[str] = "1"
+    demo_enabled: Optional[bool] = True
     accounts: Optional[List[Dict[str, Any]]] = []
     panel_accounts: Optional[List[Dict[str, Any]]] = []
 
@@ -656,6 +658,8 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
             "price_3m": str(iptv_prices.get("price_3m") or iptv_prices.get("m3u_3_mois") or 10),
             "price_6m": str(iptv_prices.get("price_6m") or iptv_prices.get("m3u_6_mois") or 20),
             "price_12m": str(iptv_prices.get("price_12m") or iptv_prices.get("m3u_12_mois") or 35),
+            "price_demo": str(iptv_prices.get("price_demo") or iptv_prices.get("demo") or iptv_config.get("price_demo") or 1),
+            "demo_enabled": iptv_config.get("demo_enabled", True) if isinstance(iptv_config.get("demo_enabled"), bool) else str(iptv_config.get("demo_enabled", "true")).lower() in ("true", "1", "on"),
             "accounts": accounts,
             "panel_accounts": panel_accounts
         },
@@ -716,10 +720,15 @@ async def admin_save_iptv(payload: IptvSettingsPayload, admin: Any = Depends(get
         prices["m3u_3_mois"] = prices["price_3m"]
         prices["m3u_6_mois"] = prices["price_6m"]
         prices["m3u_12_mois"] = prices["price_12m"]
+        demo_val = float(str(payload.price_demo or 1).replace(",", "."))
+        prices["price_demo"] = demo_val
+        prices["demo"] = demo_val
 
         config["host"] = payload.host or ""
         config["type"] = payload.type or "m3u"
         config["message_footer"] = payload.message_footer or ""
+        config["price_demo"] = demo_val
+        config["demo_enabled"] = bool(payload.demo_enabled) if payload.demo_enabled is not None else True
         config["accounts"] = payload.accounts or []
         config["panel_accounts"] = payload.panel_accounts or []
 
