@@ -11,6 +11,7 @@ from typing import Dict, Any, Optional, List
 from fastapi import APIRouter, Depends, Header, Response, Request
 from pydantic import BaseModel
 from app.auth import validate_telegram_init_data
+from app.config import settings
 from app.db import get_db_pool
 from app.services.iptv_panel import get_reseller_panel_stats
 
@@ -111,13 +112,25 @@ class MaintenancePayload(BaseModel):
 class PasswordPayload(BaseModel):
     password: str
 
+class GeneralSettingsPayload(BaseModel):
+    frontendUrl: Optional[str] = None
+    telegramBotToken: Optional[str] = None
+    botName: Optional[str] = None
+    supportTelegram: Optional[str] = None
+    maintenanceMode: Optional[bool] = None
+
+class SecuritySettingsPayload(BaseModel):
+    internalApiSecret: Optional[str] = None
+    apiSecretKey: Optional[str] = None
+    adminSlug: Optional[str] = None
+
 # =====================================================================
 
 def _generate_admin_token() -> str:
     ts = int(time.time())
     rand = secrets.token_hex(16)
     payload = f"{ts}:{rand}"
-    secret = (ADMIN_PASSWORD + os.getenv("INTERNAL_API_SECRET", "c8b9f1d0a83e47229b12480ad2e08e6f")).encode("utf-8")
+    secret = (ADMIN_PASSWORD + settings.internal_api_secret).encode("utf-8")
     sig = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
     return f"{payload}:{sig}"
 
@@ -131,7 +144,7 @@ def _is_valid_session(token: str) -> bool:
             ts = int(ts_str)
             if time.time() - ts > 86400:
                 return False
-            secret = (ADMIN_PASSWORD + os.getenv("INTERNAL_API_SECRET", "c8b9f1d0a83e47229b12480ad2e08e6f")).encode("utf-8")
+            secret = (ADMIN_PASSWORD + settings.internal_api_secret).encode("utf-8")
             expected_sig = hmac.new(secret, f"{ts}:{rand}".encode("utf-8"), hashlib.sha256).hexdigest()
             return hmac.compare_digest(sig, expected_sig)
         except Exception:
@@ -737,7 +750,10 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
             }
         },
         "oxapayApiKey": pay_data.get("oxapayApiKey", "UWUEMJ-HAHWDD-IYNN8Z-GDQ94H"),
-        "adminSlug": sec_data.get("adminSlug", "espace-sec-x9k2m7")
+        "adminSlug": sec_data.get("adminSlug", "espace-sec-x9k2m7"),
+        "frontendUrl": gen_data.get("frontendUrl", ""),
+        "telegramBotToken": gen_data.get("telegramBotToken", ""),
+        "apiSecretKey": sec_data.get("apiSecretKey", "")
     }
 
 # =====================================================================
@@ -998,6 +1014,7 @@ async def admin_set_maintenance(payload: MaintenancePayload, admin: Any = Depend
             "UPDATE settings SET general = $1 WHERE id = 'global'",
             json.dumps(gen_data)
         )
+        await settings.load_from_db(conn)
     return {"success": True, "maintenance": payload.maintenance}
 
 # =====================================================================
@@ -1022,6 +1039,7 @@ async def admin_set_password(payload: PasswordPayload, admin: Any = Depends(get_
             sec_data = raw_s if isinstance(raw_s, dict) else {}
         sec_data["adminPasswordHash"] = new_hash
         await conn.execute("UPDATE settings SET security = $1 WHERE id = 'global'", json.dumps(sec_data))
+        await settings.load_from_db(conn)
     new_token = _generate_admin_token()
     return {"success": True, "token": new_token}
 
@@ -1043,4 +1061,58 @@ async def admin_set_oxapay_key(payload: OxaPayPayload, admin: Any = Depends(get_
             pay_data = raw_p if isinstance(raw_p, dict) else {}
         pay_data["oxapayApiKey"] = api_key
         await conn.execute("UPDATE settings SET payments = $1 WHERE id = 'global'", json.dumps(pay_data))
+    return {"success": True}
+
+# =====================================================================
+
+@router.post("/settings/general")
+async def admin_save_general(payload: GeneralSettingsPayload, admin: Any = Depends(get_current_admin)):
+    if isinstance(admin, Response):
+        return admin
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        s_row = await conn.fetchrow("SELECT general FROM settings WHERE id = 'global'")
+        gen_data = {}
+        if s_row and s_row["general"]:
+            raw_g = s_row["general"]
+            while isinstance(raw_g, str):
+                raw_g = json.loads(raw_g)
+            gen_data = raw_g if isinstance(raw_g, dict) else {}
+        if payload.frontendUrl is not None:
+            gen_data["frontendUrl"] = payload.frontendUrl.strip()
+        if payload.telegramBotToken is not None:
+            gen_data["telegramBotToken"] = payload.telegramBotToken.strip()
+        if payload.botName is not None:
+            gen_data["botName"] = payload.botName.strip()
+        if payload.supportTelegram is not None:
+            gen_data["supportTelegram"] = payload.supportTelegram.strip()
+        if payload.maintenanceMode is not None:
+            gen_data["maintenanceMode"] = payload.maintenanceMode
+        await conn.execute("UPDATE settings SET general = $1 WHERE id = 'global'", json.dumps(gen_data))
+        await settings.load_from_db(conn)
+    return {"success": True}
+
+# =====================================================================
+
+@router.post("/settings/security")
+async def admin_save_security(payload: SecuritySettingsPayload, admin: Any = Depends(get_current_admin)):
+    if isinstance(admin, Response):
+        return admin
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        s_row = await conn.fetchrow("SELECT security FROM settings WHERE id = 'global'")
+        sec_data = {}
+        if s_row and s_row["security"]:
+            raw_s = s_row["security"]
+            while isinstance(raw_s, str):
+                raw_s = json.loads(raw_s)
+            sec_data = raw_s if isinstance(raw_s, dict) else {}
+        sec_key = payload.apiSecretKey or payload.internalApiSecret
+        if sec_key is not None:
+            sec_data["apiSecretKey"] = sec_key.strip()
+            sec_data.pop("internalApiSecret", None)
+        if payload.adminSlug is not None:
+            sec_data["adminSlug"] = payload.adminSlug.strip()
+        await conn.execute("UPDATE settings SET security = $1 WHERE id = 'global'", json.dumps(sec_data))
+        await settings.load_from_db(conn)
     return {"success": True}

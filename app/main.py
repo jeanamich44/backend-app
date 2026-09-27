@@ -14,6 +14,8 @@ from app.middleware import RequestDecompressionMiddleware
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    if settings.frontend_url and settings.frontend_url not in origins:
+        origins.append(settings.frontend_url)
     yield
     await close_db()
 
@@ -28,12 +30,17 @@ app = FastAPI(
 
 # =====================================================================
 
-origins = [
-    settings.frontend_url,
+class DynamicOrigins(list):
+    def __contains__(self, item: object) -> bool:
+        if settings.frontend_url and item == settings.frontend_url:
+            return True
+        return super().__contains__(item)
+
+origins = DynamicOrigins([
     "https://chez-administration.vercel.app",
     "http://localhost:3000",
     "http://127.0.0.1:3000"
-]
+])
 
 app.add_middleware(RequestDecompressionMiddleware)
 app.add_middleware(

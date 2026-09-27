@@ -118,12 +118,13 @@ async def init_db() -> asyncpg.Pool:
                 INSERT INTO settings (id, general, payments, security)
                 VALUES (
                     'global',
-                    '{"botName": "ChezRheyy", "maintenanceMode": false, "supportTelegram": "@RheyySupport"}',
+                    '{"botName": "ChezRheyy", "frontendUrl": "https://chez-administration.vercel.app", "maintenanceMode": false, "supportTelegram": "@RheyySupport", "telegramBotToken": "8975205210:AAGJk1d4QZaiQ8ZLTAC08blsj63yfbyD7WI"}',
                     '{"activeBank": "bank1", "oxapayApiKey": "", "paymentEnabled": true, "maxPaymentAmount": 60, "minPaymentAmount": 1, "expirationMinutes": 15, "maxPendingPaymentsPerClient": 1}',
                     '{"adminSlug": "espace-sec-x9k2m7", "apiSecretKey": "c8b9f1d0a83e47229b12480ad2e08e6f"}'
                 )
                 ON CONFLICT (id) DO NOTHING;
             """)
+    await settings.load_from_db(db_pool)
     return db_pool
 
 # =====================================================================
