@@ -64,12 +64,14 @@ async def init_db() -> asyncpg.Pool:
                     last_name VARCHAR(255),
                     balance NUMERIC DEFAULT 0.0,
                     is_banned BOOLEAN DEFAULT FALSE,
+                    admin BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMPTZ DEFAULT NOW(),
                     updated_at TIMESTAMPTZ DEFAULT NOW()
                 );
 
                 ALTER TABLE tma_users ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0.0;
                 ALTER TABLE tma_users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT FALSE;
+                ALTER TABLE tma_users ADD COLUMN IF NOT EXISTS admin BOOLEAN DEFAULT FALSE;
 
                 CREATE TABLE IF NOT EXISTS tma_payments (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -99,8 +101,7 @@ async def init_db() -> asyncpg.Pool:
                     id TEXT PRIMARY KEY,
                     general JSONB,
                     payments JSONB,
-                    security JSONB,
-                    admin JSONB
+                    security JSONB
                 );
 
                 CREATE TABLE IF NOT EXISTS services (
@@ -114,11 +115,12 @@ async def init_db() -> asyncpg.Pool:
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 );
 
-                INSERT INTO settings (id, general, payments)
+                INSERT INTO settings (id, general, payments, security)
                 VALUES (
                     'global',
-                    '{"botName": "ChezRheyy", "oxapayApiKey": "", "maintenanceMode": false, "supportTelegram": "@RheyySupport"}',
-                    '{"activeBank": "bank1", "paymentEnabled": true, "maxPaymentAmount": 60, "minPaymentAmount": 1, "expirationMinutes": 15, "maxPendingPaymentsPerClient": 1}'
+                    '{"botName": "ChezRheyy", "maintenanceMode": false, "supportTelegram": "@RheyySupport"}',
+                    '{"activeBank": "bank1", "oxapayApiKey": "", "paymentEnabled": true, "maxPaymentAmount": 60, "minPaymentAmount": 1, "expirationMinutes": 15, "maxPendingPaymentsPerClient": 1}',
+                    '{"adminSlug": "espace-sec-x9k2m7", "apiSecretKey": "c8b9f1d0a83e47229b12480ad2e08e6f"}'
                 )
                 ON CONFLICT (id) DO NOTHING;
             """)

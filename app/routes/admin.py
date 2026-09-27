@@ -65,6 +65,10 @@ class UserBanPayload(BaseModel):
     ban: Optional[bool] = None
     reason: Optional[str] = ""
 
+class UserAdminPayload(BaseModel):
+    userId: Any
+    admin: bool
+
 class UserDeletePayload(BaseModel):
     userId: Any
 
@@ -142,6 +146,23 @@ def _is_valid_session(token: str) -> bool:
 
 # =====================================================================
 
+async def _get_admin_password_hash() -> str:
+    try:
+        pool = await get_db_pool()
+        async with pool.acquire() as conn:
+            s_row = await conn.fetchrow("SELECT security FROM settings WHERE id = 'global'")
+            if s_row and s_row["security"]:
+                raw_s = s_row["security"]
+                while isinstance(raw_s, str):
+                    raw_s = json.loads(raw_s)
+                if isinstance(raw_s, dict) and raw_s.get("adminPasswordHash"):
+                    return str(raw_s["adminPasswordHash"])
+    except Exception:
+        pass
+    return hashlib.sha256(ADMIN_PASSWORD.strip().encode("utf-8")).hexdigest()
+
+# =====================================================================
+
 async def get_current_admin(
     request: Request,
     x_telegram_init_data: Optional[str] = Header(None, alias="X-Telegram-Init-Data"),
@@ -151,7 +172,14 @@ async def get_current_admin(
         user_data = validate_telegram_init_data(x_telegram_init_data)
         if user_data and "id" in user_data:
             user_id = int(user_data["id"])
-            if user_id in TELEGRAM_ADMIN_IDS:
+            is_adm = False
+            try:
+                pool = await get_db_pool()
+                async with pool.acquire() as conn:
+                    is_adm = await conn.fetchval("SELECT admin FROM tma_users WHERE id = $1", user_id)
+            except Exception:
+                pass
+            if is_adm is True or user_id in TELEGRAM_ADMIN_IDS:
                 return {
                     "type": "telegram",
                     "id": user_id,
@@ -173,7 +201,11 @@ async def get_current_admin(
 
 @router.post("/login")
 async def admin_login(payload: AdminLoginRequest):
-    if not secrets.compare_digest(payload.password.strip(), ADMIN_PASSWORD.strip()):
+    pwd_input = payload.password.strip()
+    input_hash = hashlib.sha256(pwd_input.encode("utf-8")).hexdigest()
+    expected_hash = await _get_admin_password_hash()
+
+    if not (secrets.compare_digest(input_hash, expected_hash) or secrets.compare_digest(pwd_input, ADMIN_PASSWORD.strip())):
         return Response(status_code=444)
 
     token = _generate_admin_token()
@@ -402,7 +434,7 @@ async def admin_get_users(admin: Any = Depends(get_current_admin)):
         pool = await get_db_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch("""
-                SELECT u.id, u.username, u.first_name, u.balance, u.is_banned, u.created_at,
+                SELECT u.id, u.username, u.first_name, u.balance, u.is_banned, u.admin, u.created_at,
                        COALESCE((SELECT COUNT(*) FROM tma_payments WHERE user_id = u.id AND status = 'PAID'), 0) as achats
                 FROM tma_users u
                 ORDER BY u.created_at DESC
@@ -414,6 +446,7 @@ async def admin_get_users(admin: Any = Depends(get_current_admin)):
                     "username": row["username"] or row["first_name"] or "Anonyme",
                     "solde": float(row["balance"] or 0),
                     "isBanned": bool(row["is_banned"]),
+                    "isAdmin": bool(row["admin"]),
                     "achats": int(row["achats"] or 0)
                 }
                 for idx, row in enumerate(rows)
@@ -464,6 +497,22 @@ async def admin_toggle_ban(payload: UserBanPayload, admin: Any = Depends(get_cur
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE tma_users SET is_banned = $1, updated_at = NOW() WHERE id = $2", is_banned, uid)
+    return {"success": True}
+
+# =====================================================================
+
+@router.post("/users/admin")
+async def admin_toggle_admin(payload: UserAdminPayload, admin: Any = Depends(get_current_admin)):
+    if isinstance(admin, Response):
+        return admin
+    try:
+        uid = int(str(payload.userId).strip())
+    except Exception:
+        return Response(status_code=400)
+
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE tma_users SET admin = $1, updated_at = NOW() WHERE id = $2", payload.admin, uid)
     return {"success": True}
 
 # =====================================================================
@@ -568,7 +617,7 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
         return admin
     pool = await get_db_pool()
     async with pool.acquire() as conn:
-        s_row = await conn.fetchrow("SELECT payments, general FROM settings WHERE id = 'global'")
+        s_row = await conn.fetchrow("SELECT payments, general, security FROM settings WHERE id = 'global'")
         pay_data = {}
         if s_row and s_row["payments"]:
             raw_p = s_row["payments"]
@@ -582,6 +631,13 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
             while isinstance(raw_g, str):
                 raw_g = json.loads(raw_g)
             gen_data = raw_g if isinstance(raw_g, dict) else {}
+
+        sec_data = {}
+        if s_row and s_row["security"]:
+            raw_s = s_row["security"]
+            while isinstance(raw_s, str):
+                raw_s = json.loads(raw_s)
+            sec_data = raw_s if isinstance(raw_s, dict) else {}
 
         iptv_row = await conn.fetchrow("SELECT prices, config FROM services WHERE slug = 'iptv'")
         iptv_prices = {}
@@ -679,7 +735,8 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
                 }
             }
         },
-        "oxapayApiKey": gen_data.get("oxapayApiKey", "UWUEMJ-HAHWDD-IYNN8Z-GDQ94H")
+        "oxapayApiKey": pay_data.get("oxapayApiKey", "UWUEMJ-HAHWDD-IYNN8Z-GDQ94H"),
+        "adminSlug": sec_data.get("adminSlug", "espace-sec-x9k2m7")
     }
 
 # =====================================================================
@@ -952,11 +1009,22 @@ async def admin_set_password(payload: PasswordPayload, admin: Any = Depends(get_
     if not payload.password.strip():
         return Response(status_code=400)
     ADMIN_PASSWORD = payload.password.strip()
+    new_hash = hashlib.sha256(ADMIN_PASSWORD.encode("utf-8")).hexdigest()
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        s_row = await conn.fetchrow("SELECT security FROM settings WHERE id = 'global'")
+        sec_data = {}
+        if s_row and s_row["security"]:
+            raw_s = s_row["security"]
+            while isinstance(raw_s, str):
+                raw_s = json.loads(raw_s)
+            sec_data = raw_s if isinstance(raw_s, dict) else {}
+        sec_data["adminPasswordHash"] = new_hash
+        await conn.execute("UPDATE settings SET security = $1 WHERE id = 'global'", json.dumps(sec_data))
     new_token = _generate_admin_token()
     return {"success": True, "token": new_token}
 
 # =====================================================================
-
 
 @router.post("/settings/oxapay")
 async def admin_set_oxapay_key(payload: OxaPayPayload, admin: Any = Depends(get_current_admin)):
@@ -965,13 +1033,13 @@ async def admin_set_oxapay_key(payload: OxaPayPayload, admin: Any = Depends(get_
     api_key = payload.api_key.strip()
     pool = await get_db_pool()
     async with pool.acquire() as conn:
-        s_row = await conn.fetchrow("SELECT general FROM settings WHERE id = 'global'")
-        gen_data = {}
-        if s_row and s_row["general"]:
-            raw_g = s_row["general"]
-            while isinstance(raw_g, str):
-                raw_g = json.loads(raw_g)
-            gen_data = raw_g if isinstance(raw_g, dict) else {}
-        gen_data["oxapayApiKey"] = api_key
-        await conn.execute("UPDATE settings SET general = $1 WHERE id = 'global'", json.dumps(gen_data))
+        s_row = await conn.fetchrow("SELECT payments FROM settings WHERE id = 'global'")
+        pay_data = {}
+        if s_row and s_row["payments"]:
+            raw_p = s_row["payments"]
+            while isinstance(raw_p, str):
+                raw_p = json.loads(raw_p)
+            pay_data = raw_p if isinstance(raw_p, dict) else {}
+        pay_data["oxapayApiKey"] = api_key
+        await conn.execute("UPDATE settings SET payments = $1 WHERE id = 'global'", json.dumps(pay_data))
     return {"success": True}
