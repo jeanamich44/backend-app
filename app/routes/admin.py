@@ -585,21 +585,22 @@ async def admin_get_transactions(admin: Any = Depends(get_current_admin)):
         pool = await get_db_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch("""
-                SELECT id, user_id, amount, status, checkout_id, created_at
-                FROM tma_payments
-                WHERE status = 'PAID'
+                SELECT id, user_id, brand, code, pin, value, price, notes, created_at
+                FROM transactions
                 ORDER BY created_at DESC
-                LIMIT 200
+                LIMIT 500
             """)
             txs = [
                 {
                     "id": str(row["id"]),
                     "userId": str(row["user_id"]),
-                    "brand": "Rechargement CB",
-                    "code": row["checkout_id"] or "N/A",
-                    "price": float(row["amount"] or 0),
-                    "valeur": float(row["amount"] or 0),
-                    "status": row["status"],
+                    "brand": row["brand"] or "",
+                    "code": row["code"] or "",
+                    "pin": row["pin"] or "",
+                    "value": float(row["value"] or 0),
+                    "valeur": float(row["value"] or 0),
+                    "price": float(row["price"] or 0),
+                    "notes": row["notes"] or "",
                     "createdAt": row["created_at"].isoformat() if row["created_at"] else ""
                 }
                 for row in rows
