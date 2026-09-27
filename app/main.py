@@ -61,7 +61,7 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "online"}
+    return {"status": "online", "service": "backend"}
 
 # =====================================================================
 
