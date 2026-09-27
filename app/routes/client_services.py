@@ -4,7 +4,13 @@ import urllib.parse
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from curl_cffi.requests import AsyncSession
+import httpx
+
+try:
+    from curl_cffi.requests import AsyncSession
+except Exception:
+    AsyncSession = None
+
 from app.auth import get_current_user
 from app.db import get_db_pool
 
@@ -309,18 +315,25 @@ async def buy_iptv_subscription(
         target_api += f"&mac={urllib.parse.quote(mac_clean)}"
 
     try:
-        async with AsyncSession(impersonate="chrome146") as session:
-            resp = await session.get(target_api, timeout=30)
-            if resp.status_code != 200:
-                raise Exception(f"Erreur HTTP {resp.status_code} de l'API IPTV")
-            text = resp.text
-            if "Invalid API Key" in text or "error" in text.lower():
-                try:
-                    err_json = json.loads(text)
-                    if err_json.get("status") == "error":
-                        raise Exception(err_json.get("message") or err_json.get("result") or "Erreur API IPTV")
-                except json.JSONDecodeError:
-                    pass
+        if AsyncSession is not None:
+            async with AsyncSession(impersonate="chrome146") as session:
+                resp = await session.get(target_api, timeout=30)
+                if resp.status_code != 200:
+                    raise Exception(f"Erreur HTTP {resp.status_code} de l'API IPTV")
+                text = resp.text
+        else:
+            async with httpx.AsyncClient(timeout=30) as session:
+                resp = await session.get(target_api)
+                if resp.status_code != 200:
+                    raise Exception(f"Erreur HTTP {resp.status_code} de l'API IPTV")
+                text = resp.text
+        if "Invalid API Key" in text or "error" in text.lower():
+            try:
+                err_json = json.loads(text)
+                if err_json.get("status") == "error":
+                    raise Exception(err_json.get("message") or err_json.get("result") or "Erreur API IPTV")
+            except json.JSONDecodeError:
+                pass
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Échec de commande IPTV : {str(e)}")
 
@@ -424,9 +437,14 @@ async def buy_iptv_demo(user: Dict[str, Any] = Depends(get_current_user)):
     target_api = f"{api_url}{sep}action=new&type=m3u&sub=0&pack={pack}&country=FR&notes={urllib.parse.quote(note_txt)}&api_key={api_key}"
 
     try:
-        async with AsyncSession(impersonate="chrome146") as session:
-            resp = await session.get(target_api, timeout=30)
-            text = resp.text
+        if AsyncSession is not None:
+            async with AsyncSession(impersonate="chrome146") as session:
+                resp = await session.get(target_api, timeout=30)
+                text = resp.text
+        else:
+            async with httpx.AsyncClient(timeout=30) as session:
+                resp = await session.get(target_api)
+                text = resp.text
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Échec de génération de la démo : {str(e)}")
 
