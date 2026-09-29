@@ -32,6 +32,8 @@ class Settings:
         self.frontend_url: str = ""
         self.telegram_bot_token: str = ""
         self.internal_api_secret: str = ""
+        self.bot_name: str = "ChezRheyy"
+        self.support_telegram: str = ""
 
     async def load_from_db(self, pool_or_conn: Any) -> None:
         try:
@@ -74,6 +76,8 @@ class Settings:
             self.frontend_url = str(f_url).strip()
             self.telegram_bot_token = str(tg_token).strip()
             self.internal_api_secret = str(api_sec).strip()
+            self.bot_name = str(general.get("botName") or "ChezRheyy").strip()
+            self.support_telegram = str(general.get("supportTelegram") or "").strip()
             logger.info("Configuration dynamique chargée avec succès depuis la BDD.")
         except SystemExit:
             raise
