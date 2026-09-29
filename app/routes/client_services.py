@@ -134,7 +134,7 @@ async def buy_carrefour_card(
 
             price = float(row["price"] or 0)
             user_row = await conn.fetchrow("""
-                SELECT balance FROM tma_users WHERE id = $1 FOR UPDATE
+                SELECT balance FROM users WHERE id = $1 FOR UPDATE
             """, user_id)
 
             if not user_row:
@@ -146,7 +146,7 @@ async def buy_carrefour_card(
 
             new_balance = current_balance - price
             await conn.execute("""
-                UPDATE tma_users SET balance = $1, updated_at = NOW() WHERE id = $2
+                UPDATE users SET balance = $1, updated_at = NOW() WHERE id = $2
             """, new_balance, user_id)
 
             await conn.execute("""
@@ -338,7 +338,7 @@ async def buy_iptv_subscription(
 
         price = price_map[payload.sub]
 
-        user_row = await conn.fetchrow("SELECT balance FROM tma_users WHERE id = $1 FOR UPDATE", user_id)
+        user_row = await conn.fetchrow("SELECT balance FROM users WHERE id = $1 FOR UPDATE", user_id)
         if not user_row:
             raise HTTPException(status_code=404, detail="Utilisateur introuvable")
 
@@ -398,13 +398,13 @@ async def buy_iptv_subscription(
 
     async with pool.acquire() as conn:
         async with conn.transaction():
-            user_row = await conn.fetchrow("SELECT balance FROM tma_users WHERE id = $1 FOR UPDATE", user_id)
+            user_row = await conn.fetchrow("SELECT balance FROM users WHERE id = $1 FOR UPDATE", user_id)
             current_balance = float(user_row["balance"] or 0)
             if current_balance < price:
                 raise HTTPException(status_code=400, detail="Solde insuffisant au moment du débit")
 
             new_balance = current_balance - price
-            await conn.execute("UPDATE tma_users SET balance = $1, updated_at = NOW() WHERE id = $2", new_balance, user_id)
+            await conn.execute("UPDATE users SET balance = $1, updated_at = NOW() WHERE id = $2", new_balance, user_id)
             await conn.execute("""
                 INSERT INTO transactions (user_id, brand, code, pin, value, price, notes, created_at)
                 VALUES ($1, 'iptv', $2, $3, $4, $5, $6, NOW())
@@ -472,7 +472,7 @@ async def buy_iptv_demo(user: Dict[str, Any] = Depends(get_current_user)):
             logger.error(f"iptv.price_demo invalide en DB ({raw_price_demo}): {e}")
             raise HTTPException(status_code=500, detail="Tarif démo IPTV invalide en base de données")
 
-        user_row = await conn.fetchrow("SELECT balance FROM tma_users WHERE id = $1 FOR UPDATE", user_id)
+        user_row = await conn.fetchrow("SELECT balance FROM users WHERE id = $1 FOR UPDATE", user_id)
         if not user_row:
             logger.error(f"Utilisateur {user_id} introuvable en DB lors de buy-demo")
             raise HTTPException(status_code=404, detail="Utilisateur introuvable")
@@ -509,12 +509,12 @@ async def buy_iptv_demo(user: Dict[str, Any] = Depends(get_current_user)):
     async with pool.acquire() as conn:
         async with conn.transaction():
             if demo_price > 0:
-                await conn.execute("UPDATE tma_users SET balance = balance - $1, updated_at = NOW() WHERE id = $2", demo_price, user_id)
+                await conn.execute("UPDATE users SET balance = balance - $1, updated_at = NOW() WHERE id = $2", demo_price, user_id)
             await conn.execute("""
                 INSERT INTO transactions (user_id, brand, code, pin, value, price, notes, created_at)
                 VALUES ($1, 'iptv', $2, $3, 0, $4, $5, NOW())
             """, user_id, username, password, demo_price, extracted_url or "")
-            new_bal_row = await conn.fetchval("SELECT balance FROM tma_users WHERE id = $1", user_id)
+            new_bal_row = await conn.fetchval("SELECT balance FROM users WHERE id = $1", user_id)
 
     return {
         "success": True,

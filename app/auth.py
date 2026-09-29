@@ -55,7 +55,7 @@ async def upsert_telegram_user(user_data: Dict[str, Any]) -> Dict[str, Any]:
     last_name = user_data.get("last_name")
 
     query = """
-    INSERT INTO tma_users (id, username, first_name, last_name, updated_at)
+    INSERT INTO users (id, username, first_name, last_name, updated_at)
     VALUES ($1, $2, $3, $4, NOW())
     ON CONFLICT (id) DO UPDATE SET
         username = EXCLUDED.username,

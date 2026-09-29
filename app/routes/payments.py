@@ -70,7 +70,7 @@ async def payment_history(
         rows = await conn.fetch(
             """
             SELECT checkout_id, amount, currency, status, created_at
-            FROM tma_payments
+            FROM payments
             WHERE user_id = $1
             ORDER BY created_at DESC
             LIMIT $2

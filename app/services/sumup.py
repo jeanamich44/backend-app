@@ -121,7 +121,7 @@ async def create_checkout(
     async with pool.acquire() as conn:
         await conn.execute(
             """
-            UPDATE tma_payments
+            UPDATE payments
             SET status = 'EXPIRED', updated_at = NOW()
             WHERE user_id = $1 AND status = 'PENDING' AND created_at < NOW() - ($2 * INTERVAL '1 minute')
             """,
@@ -130,7 +130,7 @@ async def create_checkout(
         )
 
         pending = await conn.fetchrow(
-            "SELECT checkout_id FROM tma_payments WHERE user_id = $1 AND status = 'PENDING' ORDER BY created_at DESC LIMIT 1",
+            "SELECT checkout_id FROM payments WHERE user_id = $1 AND status = 'PENDING' ORDER BY created_at DESC LIMIT 1",
             user_id
         )
 
@@ -145,7 +145,7 @@ async def create_checkout(
 
     async with pool.acquire() as conn:
         daily_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM tma_payments WHERE user_id = $1 AND created_at >= NOW() - INTERVAL '24 hours'",
+            "SELECT COUNT(*) FROM payments WHERE user_id = $1 AND created_at >= NOW() - INTERVAL '24 hours'",
             user_id
         )
         if daily_count and daily_count >= 7:
@@ -197,7 +197,7 @@ async def create_checkout(
         async with pool.acquire() as conn:
             await conn.execute(
                 """
-                INSERT INTO tma_payments (user_id, checkout_id, checkout_reference, amount, currency, status, sumup_payload)
+                INSERT INTO payments (user_id, checkout_id, checkout_reference, amount, currency, status, sumup_payload)
                 VALUES ($1, $2, $3, $4, 'EUR', 'PENDING', $5::jsonb)
                 """,
                 user_id,
@@ -226,7 +226,7 @@ async def verify_checkout(
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         payment = await conn.fetchrow(
-            "SELECT * FROM tma_payments WHERE checkout_id = $1",
+            "SELECT * FROM payments WHERE checkout_id = $1",
             checkout_id
         )
 
@@ -244,7 +244,7 @@ async def verify_checkout(
     if current_status == "PAID":
         print(f"[RENDER SUMUP VERIFY DÉJÀ PAYÉ] Checkout {checkout_id} déjà marqué PAID pour user {payer_id}", flush=True)
         async with pool.acquire() as conn:
-            user_row = await conn.fetchrow("SELECT balance FROM tma_users WHERE id = $1", payer_id)
+            user_row = await conn.fetchrow("SELECT balance FROM users WHERE id = $1", payer_id)
             balance = float(user_row["balance"]) if user_row else 0.0
         return {
             "checkout_id": checkout_id,
@@ -275,7 +275,7 @@ async def verify_checkout(
             print(f"[RENDER SUMUP API 404] Checkout {checkout_id} non trouvé chez SumUp, bascule en EXPIRED", flush=True)
             async with pool.acquire() as conn:
                 await conn.execute(
-                    "UPDATE tma_payments SET status = 'EXPIRED', updated_at = NOW() WHERE checkout_id = $1",
+                    "UPDATE payments SET status = 'EXPIRED', updated_at = NOW() WHERE checkout_id = $1",
                     checkout_id
                 )
             return {
@@ -301,7 +301,7 @@ async def verify_checkout(
             async with conn.transaction():
                 upd = await conn.execute(
                     """
-                    UPDATE tma_payments
+                    UPDATE payments
                     SET status = 'PAID', updated_at = NOW(), sumup_payload = $1::jsonb
                     WHERE checkout_id = $2 AND status != 'PAID'
                     """,
@@ -311,7 +311,7 @@ async def verify_checkout(
                 if upd == "UPDATE 1":
                     user_upd = await conn.fetchrow(
                         """
-                        UPDATE tma_users
+                        UPDATE users
                         SET balance = balance + $1, updated_at = NOW()
                         WHERE id = $2
                         RETURNING balance
@@ -322,7 +322,7 @@ async def verify_checkout(
                     new_balance = float(user_upd["balance"]) if user_upd else 0.0
                     print(f"[RENDER SUMUP CRÉDIT EFFECTUÉ] User {payer_id} crédité de +{amount}€ (Solde={new_balance}€)", flush=True)
                 else:
-                    user_row = await conn.fetchrow("SELECT balance FROM tma_users WHERE id = $1", payer_id)
+                    user_row = await conn.fetchrow("SELECT balance FROM users WHERE id = $1", payer_id)
                     new_balance = float(user_row["balance"]) if user_row else 0.0
 
         return {
@@ -336,7 +336,7 @@ async def verify_checkout(
         async with pool.acquire() as conn:
             await conn.execute(
                 """
-                UPDATE tma_payments
+                UPDATE payments
                 SET status = 'FAILED', updated_at = NOW(), sumup_payload = $1::jsonb
                 WHERE checkout_id = $2
                 """,
@@ -353,7 +353,7 @@ async def verify_checkout(
         async with pool.acquire() as conn:
             await conn.execute(
                 """
-                UPDATE tma_payments
+                UPDATE payments
                 SET status = 'CANCELLED', updated_at = NOW(), sumup_payload = $1::jsonb
                 WHERE checkout_id = $2
                 """,
@@ -370,7 +370,7 @@ async def verify_checkout(
         async with pool.acquire() as conn:
             await conn.execute(
                 """
-                UPDATE tma_payments
+                UPDATE payments
                 SET status = 'EXPIRED', updated_at = NOW(), sumup_payload = $1::jsonb
                 WHERE checkout_id = $2
                 """,
@@ -397,7 +397,7 @@ async def get_pending_checkout(user_id: int) -> Optional[Dict[str, Any]]:
     async with pool.acquire() as conn:
         await conn.execute(
             """
-            UPDATE tma_payments
+            UPDATE payments
             SET status = 'EXPIRED', updated_at = NOW()
             WHERE user_id = $1 AND status = 'PENDING' AND created_at < NOW() - ($2 * INTERVAL '1 minute')
             """,
@@ -408,7 +408,7 @@ async def get_pending_checkout(user_id: int) -> Optional[Dict[str, Any]]:
         row = await conn.fetchrow(
             """
             SELECT checkout_id, amount, created_at, sumup_payload
-            FROM tma_payments
+            FROM payments
             WHERE user_id = $1 AND status = 'PENDING'
             ORDER BY created_at DESC
             LIMIT 1
@@ -442,7 +442,7 @@ async def cancel_checkout(user_id: int) -> Dict[str, Any]:
         payment = await conn.fetchrow(
             """
             SELECT checkout_id, sumup_payload
-            FROM tma_payments
+            FROM payments
             WHERE user_id = $1 AND status = 'PENDING'
             ORDER BY created_at DESC
             LIMIT 1
@@ -478,7 +478,7 @@ async def cancel_checkout(user_id: int) -> Dict[str, Any]:
 
         await conn.execute(
             """
-            UPDATE tma_payments
+            UPDATE payments
             SET status = 'CANCELLED', updated_at = NOW()
             WHERE checkout_id = $1
             """,

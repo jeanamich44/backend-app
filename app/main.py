@@ -7,7 +7,7 @@ from app.routes.user import router as user_router
 from app.routes.payments import router as payments_router
 from app.routes.admin import router as admin_router
 from app.routes.client_services import router as client_services_router
-from app.middleware import RequestDecompressionMiddleware
+from app.middleware import RequestDecompressionMiddleware, InternalSecretMiddleware
 
 # =====================================================================
 
@@ -42,6 +42,7 @@ origins = DynamicOrigins([
     "http://127.0.0.1:3000"
 ])
 
+app.add_middleware(InternalSecretMiddleware)
 app.add_middleware(RequestDecompressionMiddleware)
 app.add_middleware(
     CORSMiddleware,

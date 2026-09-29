@@ -191,7 +191,7 @@ async def get_current_admin(
             try:
                 pool = await get_db_pool()
                 async with pool.acquire() as conn:
-                    is_adm = await conn.fetchval("SELECT admin FROM tma_users WHERE id = $1", user_id)
+                    is_adm = await conn.fetchval("SELECT admin FROM users WHERE id = $1", user_id)
             except Exception:
                 pass
             if is_adm is True or user_id in TELEGRAM_ADMIN_IDS:
@@ -262,13 +262,13 @@ async def admin_stats(admin: Any = Depends(get_current_admin)):
 
     async with pool.acquire() as conn:
         try:
-            u_row = await conn.fetchval("SELECT COUNT(*) FROM tma_users")
+            u_row = await conn.fetchval("SELECT COUNT(*) FROM users")
             total_users = int(u_row or 0)
         except Exception:
             pass
 
         try:
-            p_row = await conn.fetchrow("SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM tma_payments WHERE status = 'PAID'")
+            p_row = await conn.fetchrow("SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM payments WHERE status = 'PAID'")
             if p_row:
                 total_payments = int(p_row[0] or 0)
                 total_payments_vol = float(p_row[1] or 0.0)
@@ -290,7 +290,7 @@ async def admin_stats(admin: Any = Depends(get_current_admin)):
             pass
 
         try:
-            g_row = await conn.fetchval("SELECT COUNT(*) FROM tma_generations")
+            g_row = await conn.fetchval("SELECT COUNT(*) FROM generations")
             gen_count = int(g_row or 0)
         except Exception:
             pass
@@ -311,7 +311,7 @@ async def admin_stats(admin: Any = Depends(get_current_admin)):
             pass
 
         try:
-            pm_rows = await conn.fetch("SELECT id, user_id, checkout_id, amount, status, created_at FROM tma_payments ORDER BY created_at DESC LIMIT 10")
+            pm_rows = await conn.fetch("SELECT id, user_id, checkout_id, amount, status, created_at FROM payments ORDER BY created_at DESC LIMIT 10")
             recent_payments = [
                 {
                     "id": str(row["id"]),
@@ -450,8 +450,8 @@ async def admin_get_users(admin: Any = Depends(get_current_admin)):
         async with pool.acquire() as conn:
             rows = await conn.fetch("""
                 SELECT u.id, u.username, u.first_name, u.balance, u.is_banned, u.admin, u.created_at,
-                       COALESCE((SELECT COUNT(*) FROM tma_payments WHERE user_id = u.id AND status = 'PAID'), 0) as achats
-                FROM tma_users u
+                       COALESCE((SELECT COUNT(*) FROM payments WHERE user_id = u.id AND status = 'PAID'), 0) as achats
+                FROM users u
                 ORDER BY u.created_at DESC
             """)
             users = [
@@ -485,7 +485,7 @@ async def admin_update_user_solde(payload: UserSoldePayload, admin: Any = Depend
     val = float(payload.amount)
     pool = await get_db_pool()
     async with pool.acquire() as conn:
-        current_bal = await conn.fetchval("SELECT balance FROM tma_users WHERE id = $1", uid)
+        current_bal = await conn.fetchval("SELECT balance FROM users WHERE id = $1", uid)
         if current_bal is None:
             return Response(status_code=404)
         if payload.action == "set":
@@ -494,7 +494,7 @@ async def admin_update_user_solde(payload: UserSoldePayload, admin: Any = Depend
             new_bal = float(current_bal) + abs(val)
         else:
             new_bal = max(0.0, float(current_bal) - abs(val))
-        await conn.execute("UPDATE tma_users SET balance = $1, updated_at = NOW() WHERE id = $2", new_bal, uid)
+        await conn.execute("UPDATE users SET balance = $1, updated_at = NOW() WHERE id = $2", new_bal, uid)
     return {"success": True, "balance": new_bal}
 
 # =====================================================================
@@ -511,7 +511,7 @@ async def admin_toggle_ban(payload: UserBanPayload, admin: Any = Depends(get_cur
     is_banned = payload.banned if payload.banned is not None else (payload.ban if payload.ban is not None else False)
     pool = await get_db_pool()
     async with pool.acquire() as conn:
-        await conn.execute("UPDATE tma_users SET is_banned = $1, updated_at = NOW() WHERE id = $2", is_banned, uid)
+        await conn.execute("UPDATE users SET is_banned = $1, updated_at = NOW() WHERE id = $2", is_banned, uid)
     return {"success": True}
 
 # =====================================================================
@@ -527,7 +527,7 @@ async def admin_toggle_admin(payload: UserAdminPayload, admin: Any = Depends(get
 
     pool = await get_db_pool()
     async with pool.acquire() as conn:
-        await conn.execute("UPDATE tma_users SET admin = $1, updated_at = NOW() WHERE id = $2", payload.admin, uid)
+        await conn.execute("UPDATE users SET admin = $1, updated_at = NOW() WHERE id = $2", payload.admin, uid)
     return {"success": True}
 
 # =====================================================================
@@ -543,7 +543,7 @@ async def admin_delete_user(payload: UserDeletePayload, admin: Any = Depends(get
 
     pool = await get_db_pool()
     async with pool.acquire() as conn:
-        await conn.execute("DELETE FROM tma_users WHERE id = $1", uid)
+        await conn.execute("DELETE FROM users WHERE id = $1", uid)
     return {"success": True}
 
 # =====================================================================
@@ -572,7 +572,7 @@ async def admin_get_payments(admin: Any = Depends(get_current_admin)):
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
             SELECT id, user_id, amount, currency, status, checkout_id, created_at
-            FROM tma_payments
+            FROM payments
             ORDER BY created_at DESC
             LIMIT 200
         """)

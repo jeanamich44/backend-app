@@ -1,6 +1,10 @@
 import gzip
 import brotli
+import hmac
+import json
+import os
 from starlette.types import ASGIApp, Scope, Receive, Send, Message
+from app.config import settings
 
 # =====================================================================
 
@@ -61,3 +65,52 @@ class RequestDecompressionMiddleware:
             await self.app(scope, new_receive, send)
         else:
             await self.app(scope, receive, send)
+
+# =====================================================================
+
+class InternalSecretMiddleware:
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        method = scope.get("method", "")
+        if method == "OPTIONS":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        norm_path = path.rstrip("/") or "/"
+        if norm_path in ("/", "/health", "/api/payments/webhook"):
+            await self.app(scope, receive, send)
+            return
+
+        expected_secret = settings.internal_api_secret or os.getenv("INTERNAL_API_SECRET", "")
+        if not expected_secret:
+            await self.app(scope, receive, send)
+            return
+
+        headers = dict(scope.get("headers", []))
+        incoming_secret = headers.get(b"x-internal-secret", b"").decode("latin-1").strip()
+
+        if not hmac.compare_digest(incoming_secret, expected_secret):
+            body = json.dumps({"detail": "Forbidden: invalid internal secret"}).encode("utf-8")
+            response_headers = [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode("ascii")),
+            ]
+            await send({
+                "type": "http.response.start",
+                "status": 403,
+                "headers": response_headers,
+            })
+            await send({
+                "type": "http.response.body",
+                "body": body,
+            })
+            return
+
+        await self.app(scope, receive, send)

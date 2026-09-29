@@ -57,7 +57,7 @@ async def init_db() -> asyncpg.Pool:
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 );
 
-                CREATE TABLE IF NOT EXISTS tma_users (
+                CREATE TABLE IF NOT EXISTS users (
                     id BIGINT PRIMARY KEY,
                     username VARCHAR(255),
                     first_name VARCHAR(255),
@@ -69,11 +69,11 @@ async def init_db() -> asyncpg.Pool:
                     updated_at TIMESTAMPTZ DEFAULT NOW()
                 );
 
-                ALTER TABLE tma_users ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0.0;
-                ALTER TABLE tma_users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT FALSE;
-                ALTER TABLE tma_users ADD COLUMN IF NOT EXISTS admin BOOLEAN DEFAULT FALSE;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0.0;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT FALSE;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS admin BOOLEAN DEFAULT FALSE;
 
-                CREATE TABLE IF NOT EXISTS tma_payments (
+                CREATE TABLE IF NOT EXISTS payments (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     user_id BIGINT,
                     checkout_id VARCHAR(255),
@@ -86,7 +86,7 @@ async def init_db() -> asyncpg.Pool:
                     updated_at TIMESTAMPTZ DEFAULT NOW()
                 );
 
-                CREATE TABLE IF NOT EXISTS tma_generations (
+                CREATE TABLE IF NOT EXISTS generations (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     user_id BIGINT,
                     category VARCHAR(100),
