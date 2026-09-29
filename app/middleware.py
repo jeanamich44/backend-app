@@ -84,7 +84,7 @@ class InternalSecretMiddleware:
 
         path = scope.get("path", "")
         norm_path = path.rstrip("/") or "/"
-        if norm_path in ("/", "/health", "/api/payments/webhook"):
+        if norm_path in ("/", "/health", "/api/payments/webhook", "/api/telegram/webhook"):
             await self.app(scope, receive, send)
             return
 
