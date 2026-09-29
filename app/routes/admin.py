@@ -16,6 +16,7 @@ from app.auth import validate_telegram_init_data
 from app.config import settings
 from app.db import get_db_pool
 from app.services.iptv_panel import get_reseller_panel_stats
+from app.version import get_git_info
 
 # =====================================================================
 
@@ -374,8 +375,17 @@ async def admin_stats(admin: Any = Depends(get_current_admin)):
         "payments_volume": float(total_ca),
         "stock_count": int(total_stock),
         "generations_count": int(gen_count),
-        "timestamp": datetime.now(timezone.utc).isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "version": get_git_info()
     }
+
+# =====================================================================
+
+@router.get("/version")
+async def admin_get_version(admin: Any = Depends(get_current_admin)):
+    if isinstance(admin, Response):
+        return admin
+    return get_git_info()
 
 # =====================================================================
 

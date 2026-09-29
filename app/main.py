@@ -9,6 +9,7 @@ from app.routes.admin import router as admin_router
 from app.routes.client_services import router as client_services_router
 from app.routes.bot import router as bot_router
 from app.middleware import RequestDecompressionMiddleware, InternalSecretMiddleware
+from app.version import get_git_info
 
 # =====================================================================
 
@@ -63,7 +64,14 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "online", "service": "backend"}
+    info = get_git_info()
+    return {
+        "status": "online",
+        "service": "backend",
+        "commit": info["commit"],
+        "commitDate": info["commit_date"],
+        "bootTime": info["boot_time"]
+    }
 
 # =====================================================================
 
