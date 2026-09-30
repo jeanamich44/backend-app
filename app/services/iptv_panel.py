@@ -377,7 +377,7 @@ async def generate_demo_iptv_line(account: Dict[str, Any], host: str, telegram_i
 
     server_base = (host or "").strip().rstrip("/")
     if not server_base:
-        server_base = "http://cf.business-cloud-neo.com"
+        raise Exception("Hôte IPTV non fourni pour la génération de la démo")
 
     return {
         "username": extracted_user,

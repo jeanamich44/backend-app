@@ -62,7 +62,7 @@ async def upsert_telegram_user(user_data: Dict[str, Any]) -> Dict[str, Any]:
         first_name = EXCLUDED.first_name,
         last_name = EXCLUDED.last_name,
         updated_at = NOW()
-    RETURNING id, username, first_name, last_name, balance, is_banned, created_at, updated_at;
+    RETURNING id, username, first_name, last_name, balance, is_banned, admin, created_at, updated_at;
     """
 
     async with pool.acquire() as conn:
@@ -80,6 +80,7 @@ async def upsert_telegram_user(user_data: Dict[str, Any]) -> Dict[str, Any]:
             "last_name": row["last_name"],
             "balance": float(row["balance"]),
             "is_banned": row["is_banned"],
+            "admin": bool(row["admin"]),
             "created_at": row["created_at"].isoformat() if row["created_at"] else None,
             "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None
         }

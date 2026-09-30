@@ -489,7 +489,10 @@ async def buy_iptv_demo(user: Dict[str, Any] = Depends(get_current_user)):
             logger.error("Aucun compte panel IPTV actif configuré")
             raise HTTPException(status_code=500, detail="Aucun compte panel IPTV configuré")
 
-        host = config.get("host") or "http://cf.business-cloud-neo.com"
+        host = (config.get("host") or "").strip()
+        if not host:
+            logger.error("Hôte IPTV manquant en BDD dans services.config")
+            raise HTTPException(status_code=500, detail="Hôte IPTV non configuré en base de données")
 
     try:
         demo_res = await generate_demo_iptv_line(active_panel, host, user_id)

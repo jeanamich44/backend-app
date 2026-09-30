@@ -24,17 +24,8 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 # =====================================================================
 
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD") or os.getenv("ADMIN_PANEL_PASSWORD") or "ChezRheyy2026!"
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD") or os.getenv("ADMIN_PANEL_PASSWORD") or ""
 
-DEFAULT_ADMIN_IDS = [8740419947, 6298536933, 8676919760, 5883885733, 1461973886]
-env_admin_ids = os.getenv("TELEGRAM_ADMIN_IDS", "")
-if env_admin_ids.strip():
-    try:
-        TELEGRAM_ADMIN_IDS = [int(x.strip()) for x in env_admin_ids.split(",") if x.strip()]
-    except Exception:
-        TELEGRAM_ADMIN_IDS = DEFAULT_ADMIN_IDS
-else:
-    TELEGRAM_ADMIN_IDS = DEFAULT_ADMIN_IDS
 
 # =====================================================================
 
@@ -175,7 +166,9 @@ async def _get_admin_password_hash() -> str:
                     return str(raw_s["adminPasswordHash"])
     except Exception:
         pass
-    return hashlib.sha256(ADMIN_PASSWORD.strip().encode("utf-8")).hexdigest()
+    if ADMIN_PASSWORD.strip():
+        return hashlib.sha256(ADMIN_PASSWORD.strip().encode("utf-8")).hexdigest()
+    return ""
 
 # =====================================================================
 
@@ -195,7 +188,7 @@ async def get_current_admin(
                     is_adm = await conn.fetchval("SELECT admin FROM users WHERE id = $1", user_id)
             except Exception:
                 pass
-            if is_adm is True or user_id in TELEGRAM_ADMIN_IDS:
+            if is_adm is True:
                 return {
                     "type": "telegram",
                     "id": user_id,
@@ -221,7 +214,13 @@ async def admin_login(payload: AdminLoginRequest):
     input_hash = hashlib.sha256(pwd_input.encode("utf-8")).hexdigest()
     expected_hash = await _get_admin_password_hash()
 
-    if not (secrets.compare_digest(input_hash, expected_hash) or secrets.compare_digest(pwd_input, ADMIN_PASSWORD.strip())):
+    if not expected_hash:
+        return Response(status_code=444)
+
+    is_valid_hash = secrets.compare_digest(input_hash, expected_hash)
+    is_valid_plain = bool(ADMIN_PASSWORD.strip() and secrets.compare_digest(pwd_input, ADMIN_PASSWORD.strip()))
+
+    if not (is_valid_hash or is_valid_plain):
         return Response(status_code=444)
 
     token = _generate_admin_token()
@@ -683,10 +682,10 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
         accounts = iptv_config.get("accounts")
         if not accounts or not isinstance(accounts, list) or len(accounts) == 0:
             acc_key = iptv_config.get("api_key", "c747279bd5a2284570cd5e888ef182f6")
-            acc_pack = iptv_config.get("pack") or iptv_config.get("package_id") or iptv_config.get("bouquet") or "47013"
-            acc_url = iptv_config.get("api_url", "https://4k.cms-only.ru/api/api.php")
+            acc_pack = iptv_config.get("pack") or iptv_config.get("package_id") or iptv_config.get("bouquet") or ""
+            acc_url = iptv_config.get("api_url") or ""
             accounts = [{
-                "name": iptv_config.get("name", "ChezRheyy"),
+                "name": iptv_config.get("name") or "Principal",
                 "pack": str(acc_pack),
                 "api_key": str(acc_key),
                 "api_url": str(acc_url),
@@ -694,15 +693,8 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
             }]
 
         panel_accounts = iptv_config.get("panel_accounts")
-        if not panel_accounts or not isinstance(panel_accounts, list) or len(panel_accounts) == 0:
-            p_user = iptv_config.get("username", "LABANK")
-            p_pass = iptv_config.get("password", "LECOFFREFORTT")
-            panel_accounts = [{
-                "name": iptv_config.get("name", "ChezRheyy"),
-                "username": str(p_user),
-                "password": str(p_pass),
-                "active": True
-            }]
+        if not panel_accounts or not isinstance(panel_accounts, list):
+            panel_accounts = []
 
         active_b = pay_data.get("activeBank", "bank2")
         banks_list = []
@@ -728,7 +720,7 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
 
     return {
         "iptv": {
-            "host": iptv_config.get("host") or "http://cf.business-cloud-neo.com",
+            "host": iptv_config.get("host") or "",
             "type": iptv_config.get("type", "m3u"),
             "message_footer": iptv_config.get("message_footer", ""),
             "price_1m": str(iptv_prices.get("price_1m", "")),

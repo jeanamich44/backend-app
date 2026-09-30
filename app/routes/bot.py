@@ -22,15 +22,6 @@ router = APIRouter(prefix="/api/telegram", tags=["telegram"])
 
 # =====================================================================
 
-DEFAULT_ADMIN_IDS = [8740419947, 6298536933, 8676919760, 5883885733, 1461973886]
-env_admin_ids = os.getenv("TELEGRAM_ADMIN_IDS", "")
-if env_admin_ids.strip():
-    try:
-        TELEGRAM_ADMIN_IDS = [int(x.strip()) for x in env_admin_ids.split(",") if x.strip()]
-    except Exception:
-        TELEGRAM_ADMIN_IDS = DEFAULT_ADMIN_IDS
-else:
-    TELEGRAM_ADMIN_IDS = DEFAULT_ADMIN_IDS
 
 ADMIN_COMMANDS = [
     "/addmoney",
@@ -152,8 +143,10 @@ def _escape_html(text: Any) -> str:
         return ""
     return html.escape(str(text))
 
-async def _notify_admins(text: str, exclude_id: Optional[int] = None) -> None:
-    for aid in TELEGRAM_ADMIN_IDS:
+async def _notify_admins(conn: Any, text: str, exclude_id: Optional[int] = None) -> None:
+    admin_rows = await conn.fetch("SELECT id FROM users WHERE admin = TRUE AND is_banned = FALSE")
+    for r in admin_rows:
+        aid = r["id"]
         if exclude_id and aid == exclude_id:
             continue
         try:
@@ -199,7 +192,7 @@ async def _handle_addmoney(chat_id: int, admin_id: int, admin_username: Optional
         f"<b>Par</b>: {pseudo_str} (<code>{admin_id}</code>)"
     )
     await send_telegram_message(chat_id, resp)
-    await _notify_admins(resp, exclude_id=chat_id)
+    await _notify_admins(conn, resp, exclude_id=chat_id)
 
 # =====================================================================
 
@@ -239,7 +232,7 @@ async def _handle_removemoney(chat_id: int, admin_id: int, admin_username: Optio
         f"<b>Par</b>: {pseudo_str} (<code>{admin_id}</code>)"
     )
     await send_telegram_message(chat_id, resp)
-    await _notify_admins(resp, exclude_id=chat_id)
+    await _notify_admins(conn, resp, exclude_id=chat_id)
 
 # =====================================================================
 
@@ -267,7 +260,7 @@ async def _handle_ban(chat_id: int, args: List[str], conn: Any) -> None:
 
     resp = f"L'ID {target_id} a bien été banni." + (f"\nRaison : {reason}" if reason else "")
     await send_telegram_message(chat_id, resp)
-    await _notify_admins(f"BAN USER: {target_id}\nRaison: {reason or 'Aucune'}", exclude_id=chat_id)
+    await _notify_admins(conn, f"BAN USER: {target_id}\nRaison: {reason or 'Aucune'}", exclude_id=chat_id)
 
 # =====================================================================
 
@@ -289,7 +282,7 @@ async def _handle_deban(chat_id: int, args: List[str], conn: Any) -> None:
 
     resp = f"L'ID {target_id} a bien été débanni."
     await send_telegram_message(chat_id, resp)
-    await _notify_admins(f"DEBAN USER: {target_id}", exclude_id=chat_id)
+    await _notify_admins(conn, f"DEBAN USER: {target_id}", exclude_id=chat_id)
 
 # =====================================================================
 
@@ -838,7 +831,7 @@ async def telegram_webhook(
             await send_telegram_message(chat_id=chat_id, text=ban_msg)
             return {"ok": True}
 
-        is_admin = (user_id in TELEGRAM_ADMIN_IDS) or bool(user_row and user_row["admin"])
+        is_admin = bool(user_row and user_row["admin"] is True)
 
         if not is_admin:
             if text.startswith("/start"):
@@ -944,33 +937,6 @@ async def telegram_webhook(
                 await _handle_demoiptv(chat_id, cmd_args, conn)
             elif cmd_raw == "/help":
                 await _handle_help(chat_id, cmd_args)
-            else:
-                await send_telegram_message(
-                    chat_id,
-                    f"❌ Commande <code>{_escape_html(cmd_raw)}</code> non reconnue. Tapez <code>/help</code>."
-                )
             return {"ok": True}
-
-        safe_bot = _escape_html(settings.bot_name or "ChezRheyy")
-        default_text = (
-            f"Pour accéder à vos commandes et aux services de <b>{safe_bot}</b>, cliquez ci-dessous :"
-        )
-        default_kb = [
-            [
-                {
-                    "text": "🚀 Ouvrir l'application",
-                    "web_app": {"url": settings.frontend_url}
-                }
-            ]
-        ]
-        if settings.support_telegram:
-            supp = settings.support_telegram.lstrip("@")
-            default_kb.append([
-                {
-                    "text": "💬 Support",
-                    "url": f"https://t.me/{supp}"
-                }
-            ])
-        await send_telegram_message(chat_id=chat_id, text=default_text, reply_markup={"inline_keyboard": default_kb})
 
     return {"ok": True}

@@ -158,7 +158,9 @@ async def create_checkout(
     token = await get_sumup_access_token(selected_bank)
     ref = str(uuid.uuid4())
 
-    backend_base = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("BACKEND_PUBLIC_URL") or "https://backend-app-eas7.onrender.com"
+    backend_base = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("BACKEND_PUBLIC_URL") or getattr(settings, "backend_url", "")
+    if not backend_base:
+        raise HTTPException(status_code=500, detail="URL publique backend non configurée")
     webhook_url = f"{backend_base.rstrip('/')}/api/payments/webhook"
 
     valid_until = (datetime.now(timezone.utc) + timedelta(minutes=exp_minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
