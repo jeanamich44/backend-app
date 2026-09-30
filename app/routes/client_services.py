@@ -317,7 +317,10 @@ async def buy_iptv_subscription(
 
         api_url = (active_acc.get("api_url") or "").strip()
         api_key = (active_acc.get("api_key") or "").strip()
-        pack = str(active_acc.get("pack") or "47013").strip()
+        pack = str(active_acc.get("pack") or "").strip()
+        if not api_url or not api_key or not pack:
+            raise HTTPException(status_code=500, detail="Configuration de l'API IPTV incomplète en base de données")
+
         host = config.get("host")
         if not host:
             logger.error("iptv.host manquant en DB dans services.config")

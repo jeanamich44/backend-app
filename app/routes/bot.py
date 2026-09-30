@@ -12,7 +12,11 @@ import httpx
 from fastapi import APIRouter, Header, HTTPException, Request
 from app.config import settings
 from app.db import get_db_pool
-from app.services.telegram import send_telegram_message
+from app.services.telegram import (
+    send_telegram_message,
+    edit_telegram_message_text,
+    answer_callback_query
+)
 
 # =====================================================================
 
@@ -39,10 +43,16 @@ ADMIN_COMMANDS = [
     "/compteapi",
     "/comptepanel",
     "/demoiptv",
+    "/amendes",
     "/help"
 ]
 
 HELP_DETAILS = {
+    "amendes": (
+        "Consulte et gère les dossiers d'annulation d'amende.",
+        "/amendes [attente|accepte|paye|refuse|finit <id>]",
+        "/amendes attente"
+    ),
     "addmoney": (
         "Ajoute du solde en euros à un utilisateur Telegram.",
         "/addmoney <id> <montant>",
@@ -545,8 +555,11 @@ async def _handle_maintenance(chat_id: int, args: List[str], conn: Any) -> None:
 async def _handle_panel(chat_id: int, conn: Any) -> None:
     s_row = await conn.fetchrow("SELECT security FROM settings WHERE id = 'global'")
     sec_data = _parse_json(s_row["security"]) if s_row else {}
-    slug = (sec_data.get("adminSlug") or "admin").strip("/")
-    base_url = settings.frontend_url.rstrip("/")
+    slug = (sec_data.get("adminSlug") or "").strip().strip("/")
+    base_url = (settings.frontend_url or "").rstrip("/")
+    if not slug or not base_url:
+        await send_telegram_message(chat_id, "❌ Panel administrateur non configuré en base de données.")
+        return
     full_url = f"{base_url}/{slug}/"
     await send_telegram_message(chat_id, f"🔑 <b>URL d'Accès au Panel Admin Web :</b>\n\n<code>{full_url}</code>")
 
@@ -780,6 +793,255 @@ async def _handle_help(chat_id: int, args: List[str]) -> None:
 
 # =====================================================================
 
+async def _handle_amendes(chat_id: int, args: List[str], conn: Any) -> None:
+    sub = args[0].lower() if len(args) > 0 else "attente"
+
+    if sub in ("finit", "finish", "termine"):
+        if len(args) < 2:
+            await send_telegram_message(chat_id, "Usage : <code>/amendes finit &lt;id_dossier&gt;</code>")
+            return
+        target_id = args[1].strip()
+        try:
+            target_uuid = uuid.UUID(target_id)
+        except Exception:
+            await send_telegram_message(chat_id, "❌ Format d'identifiant de dossier invalide.")
+            return
+
+        row = await conn.fetchrow("""
+            UPDATE amendes
+            SET status = 'FINISHED', updated_at = NOW()
+            WHERE id = $1
+            RETURNING id
+        """, target_uuid)
+        if not row:
+            await send_telegram_message(chat_id, f"❌ Dossier <code>{target_id}</code> introuvable.")
+            return
+        await send_telegram_message(chat_id, f"✅ Dossier <code>{target_id}</code> classé comme <b>TERMINÉ</b>.")
+        return
+
+    status_filter = "PENDING"
+    title_label = "EN ATTENTE"
+    if sub in ("accepte", "accepted"):
+        status_filter = "ACCEPTED"
+        title_label = "ACCEPTÉS"
+    elif sub in ("paye", "paid"):
+        status_filter = "PAID"
+        title_label = "PAYÉS"
+    elif sub in ("refuse", "rejected"):
+        status_filter = "REJECTED"
+        title_label = "REFUSÉS"
+
+    rows = await conn.fetch("""
+        SELECT a.id, a.user_id, a.price, a.note, a.created_at, u.username, u.first_name
+        FROM amendes a
+        JOIN users u ON a.user_id = u.id
+        WHERE a.status = $1
+        ORDER BY a.created_at DESC
+        LIMIT 15
+    """, status_filter)
+
+    if not rows:
+        await send_telegram_message(chat_id, f"ℹ️ Aucun dossier d'amende avec le statut <b>{title_label}</b>.")
+        return
+
+    lines = [f"📋 <b>Dossiers d'Amendes ({title_label}) :</b>\n"]
+    for r in rows:
+        c_name = f"@{r['username']}" if r["username"] else f"{r['first_name'] or ''} ({r['user_id']})"
+        p_str = f" | Tarif : <b>{float(r['price']):.2f} €</b>" if r["price"] is not None else ""
+        date_str = r["created_at"].strftime("%d/%m %H:%M") if r["created_at"] else ""
+        lines.append(f"• <code>{r['id']}</code>\n  Client : {c_name}{p_str} [{date_str}]")
+
+    await send_telegram_message(chat_id, "\n\n".join(lines))
+
+# =====================================================================
+
+async def _handle_amende_callback(callback_query: Dict[str, Any], user_row: Any, conn: Any) -> None:
+    data = callback_query.get("data") or ""
+    qid = callback_query.get("id") or ""
+    msg = callback_query.get("message") or {}
+    chat = msg.get("chat") or {}
+    chat_id = chat.get("id")
+    message_id = msg.get("message_id")
+
+    if not user_row or not user_row.get("admin"):
+        await answer_callback_query(qid, "Accès réservé aux administrateurs.", show_alert=True)
+        return
+
+    if not data.startswith("fine_yes:") and not data.startswith("fine_no:"):
+        return
+
+    action, amende_id_str = data.split(":", 1)
+    try:
+        amende_uuid = uuid.UUID(amende_id_str)
+    except Exception:
+        await answer_callback_query(qid, "Identifiant invalide.", show_alert=True)
+        return
+
+    amende = await conn.fetchrow("SELECT * FROM amendes WHERE id = $1", amende_uuid)
+    if not amende:
+        await answer_callback_query(qid, "Dossier introuvable.", show_alert=True)
+        return
+
+    if amende["status"] != "PENDING":
+        await answer_callback_query(qid, f"Ce dossier a déjà été traité ({amende['status']}).", show_alert=True)
+        await edit_telegram_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=f"⚠️ Le dossier <code>{amende_id_str}</code> a déjà été traité. Statut actuel : <b>{amende['status']}</b>."
+        )
+        return
+
+    raw_maps = amende["telegram_message_ids"]
+    while isinstance(raw_maps, str):
+        try:
+            raw_maps = json.loads(raw_maps)
+        except Exception:
+            raw_maps = []
+    if not isinstance(raw_maps, list):
+        raw_maps = []
+
+    if action == "fine_no":
+        await conn.execute("UPDATE amendes SET status = 'REJECTED', updated_at = NOW() WHERE id = $1", amende_uuid)
+        await answer_callback_query(qid, "Demande refusée.")
+        await edit_telegram_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=f"❌ <b>Dossier d'amende refusé</b> (<code>{amende_id_str}</code>)."
+        )
+        for m in raw_maps:
+            if m.get("chat_id") != chat_id and m.get("message_id"):
+                try:
+                    await edit_telegram_message_text(
+                        chat_id=m["chat_id"],
+                        message_id=m["message_id"],
+                        text=f"❌ Dossier <code>{amende_id_str}</code> refusé par un autre gestionnaire."
+                    )
+                except Exception:
+                    pass
+
+        try:
+            await send_telegram_message(
+                chat_id=amende["user_id"],
+                text=f"❌ <b>Information Dossier d'Amende</b>\nVotre dossier <code>{amende_id_str}</code> ne peut malheureusement pas être pris en charge et a été refusé."
+            )
+        except Exception:
+            pass
+
+    elif action == "fine_yes":
+        other_active = await conn.fetchrow("""
+            SELECT chat_id FROM bot_states
+            WHERE state = 'WAITING_FOR_PRICE' AND metadata->>'amende_id' = $1 AND chat_id != $2
+        """, amende_id_str, chat_id)
+
+        if other_active:
+            await answer_callback_query(qid, "Ce dossier est déjà en cours de tarification par un autre gestionnaire.", show_alert=True)
+            return
+
+        meta_json = json.dumps({"amende_id": amende_id_str, "message_id": message_id})
+        await conn.execute("""
+            INSERT INTO bot_states (chat_id, state, metadata, updated_at)
+            VALUES ($1, 'WAITING_FOR_PRICE', $2, NOW())
+            ON CONFLICT (chat_id) DO UPDATE SET
+                state = 'WAITING_FOR_PRICE',
+                metadata = $2,
+                updated_at = NOW()
+        """, chat_id, meta_json)
+
+        await answer_callback_query(qid)
+        await edit_telegram_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=f"✅ <b>Dossier accepté</b> (<code>{amende_id_str}</code>).\n\nVeuillez saisir le prix en euros pour ce dossier (nombre uniquement, ex: <b>40</b>) :"
+        )
+
+        for m in raw_maps:
+            if m.get("chat_id") != chat_id and m.get("message_id"):
+                try:
+                    await edit_telegram_message_text(
+                        chat_id=m["chat_id"],
+                        message_id=m["message_id"],
+                        text=f"⏳ Dossier <code>{amende_id_str}</code> en cours de tarification par un gestionnaire."
+                    )
+                except Exception:
+                    pass
+
+# =====================================================================
+
+async def _handle_amende_price_input(chat_id: int, text: str, state_row: Any, conn: Any) -> None:
+    try:
+        price_val = float(text.replace(",", "."))
+        if price_val <= 0:
+            raise ValueError()
+    except Exception:
+        await send_telegram_message(chat_id, "❌ Prix invalide. Veuillez saisir un nombre supérieur à 0 (ex: <b>40</b>) :")
+        return
+
+    price_rounded = round(price_val, 2)
+    meta = _parse_json(state_row["metadata"])
+    amende_id_str = meta.get("amende_id")
+
+    if not amende_id_str:
+        await conn.execute("DELETE FROM bot_states WHERE chat_id = $1", chat_id)
+        return
+
+    try:
+        amende_uuid = uuid.UUID(amende_id_str)
+    except Exception:
+        await conn.execute("DELETE FROM bot_states WHERE chat_id = $1", chat_id)
+        return
+
+    await conn.execute("""
+        UPDATE amendes
+        SET status = 'ACCEPTED', price = $1, updated_at = NOW()
+        WHERE id = $2
+    """, price_rounded, amende_uuid)
+
+    await conn.execute("DELETE FROM bot_states WHERE chat_id = $1", chat_id)
+
+    amende = await conn.fetchrow("SELECT * FROM amendes WHERE id = $1", amende_uuid)
+    raw_maps = amende["telegram_message_ids"] if amende else []
+    while isinstance(raw_maps, str):
+        try:
+            raw_maps = json.loads(raw_maps)
+        except Exception:
+            raw_maps = []
+    if not isinstance(raw_maps, list):
+        raw_maps = []
+
+    for m in raw_maps:
+        if m.get("chat_id") and m.get("message_id"):
+            try:
+                await edit_telegram_message_text(
+                    chat_id=m["chat_id"],
+                    message_id=m["message_id"],
+                    text=f"✅ <b>Dossier validé</b> (<code>{amende_id_str}</code>) au tarif de <b>{price_rounded:.2f} €</b>."
+                )
+            except Exception:
+                pass
+
+    await send_telegram_message(
+        chat_id,
+        f"✅ Tarif de <b>{price_rounded:.2f} €</b> enregistré pour le dossier <code>{amende_id_str}</code>. Le client a été notifié."
+    )
+
+    client_id = amende["user_id"] if amende else None
+    if client_id:
+        user_notify = (
+            f"✅ <b>Votre dossier d'annulation d'amende a été accepté !</b>\n\n"
+            f"<b>Dossier</b> : <code>{amende_id_str}</code>\n"
+            f"<b>Montant fixé</b> : <b>{price_rounded:.2f} €</b>\n\n"
+            f"Vous pouvez dès à présent régler ce dossier depuis l'application en débitant votre solde."
+        )
+        inline_kb = [
+            [{"text": "💳 Payer dans l'application", "web_app": {"url": settings.frontend_url}}]
+        ]
+        try:
+            await send_telegram_message(client_id, user_notify, reply_markup={"inline_keyboard": inline_kb})
+        except Exception:
+            pass
+
+# =====================================================================
+
 @router.post("/webhook")
 async def telegram_webhook(
     request: Request,
@@ -797,6 +1059,37 @@ async def telegram_webhook(
     except Exception:
         return {"ok": True}
 
+    pool = await get_db_pool()
+
+    callback_query = update.get("callback_query")
+    if callback_query:
+        from_user = callback_query.get("from")
+        if not from_user:
+            return {"ok": True}
+        user_id = from_user.get("id")
+        username = from_user.get("username")
+        first_name = from_user.get("first_name")
+        last_name = from_user.get("last_name")
+
+        async with pool.acquire() as conn:
+            user_row = await conn.fetchrow("""
+                INSERT INTO users (id, username, first_name, last_name, updated_at)
+                VALUES ($1, $2, $3, $4, NOW())
+                ON CONFLICT (id) DO UPDATE SET
+                    username = EXCLUDED.username,
+                    first_name = EXCLUDED.first_name,
+                    last_name = EXCLUDED.last_name,
+                    updated_at = NOW()
+                RETURNING is_banned, admin;
+            """, user_id, username, first_name, last_name)
+
+            if not user_row or user_row["is_banned"]:
+                await answer_callback_query(callback_query.get("id") or "", "Accès refusé.", show_alert=True)
+                return {"ok": True}
+
+            await _handle_amende_callback(callback_query, user_row, conn)
+            return {"ok": True}
+
     message = update.get("message")
     if not message:
         return {"ok": True}
@@ -813,7 +1106,6 @@ async def telegram_webhook(
     last_name = from_user.get("last_name")
     text = (message.get("text") or "").strip()
 
-    pool = await get_db_pool()
     async with pool.acquire() as conn:
         upsert_query = """
         INSERT INTO users (id, username, first_name, last_name, updated_at)
@@ -832,6 +1124,12 @@ async def telegram_webhook(
             return {"ok": True}
 
         is_admin = bool(user_row and user_row["admin"] is True)
+
+        if is_admin and not text.startswith("/"):
+            state_row = await conn.fetchrow("SELECT * FROM bot_states WHERE chat_id = $1", chat_id)
+            if state_row and state_row["state"] == "WAITING_FOR_PRICE":
+                await _handle_amende_price_input(chat_id, text, state_row, conn)
+                return {"ok": True}
 
         if not is_admin:
             if text.startswith("/start"):
@@ -935,6 +1233,8 @@ async def telegram_webhook(
                 await _handle_comptepanel(chat_id, cmd_args, conn)
             elif cmd_raw == "/demoiptv":
                 await _handle_demoiptv(chat_id, cmd_args, conn)
+            elif cmd_raw == "/amendes":
+                await _handle_amendes(chat_id, cmd_args, conn)
             elif cmd_raw == "/help":
                 await _handle_help(chat_id, cmd_args)
             return {"ok": True}

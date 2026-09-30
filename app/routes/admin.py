@@ -16,6 +16,7 @@ from app.auth import validate_telegram_init_data
 from app.config import settings
 from app.db import get_db_pool
 from app.services.iptv_panel import get_reseller_panel_stats
+from app.services.telegram import send_telegram_message, edit_telegram_message_text
 from app.version import get_git_info
 
 # =====================================================================
@@ -117,6 +118,12 @@ class SecuritySettingsPayload(BaseModel):
     internalApiSecret: Optional[str] = None
     apiSecretKey: Optional[str] = None
     adminSlug: Optional[str] = None
+
+class AmendeDecisionPayload(BaseModel):
+    action: str
+    price: Optional[float] = None
+    adminNotes: Optional[str] = None
+    admin_notes: Optional[str] = None
 
 # =====================================================================
 
@@ -681,7 +688,7 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
                 iptv_config = raw_c if isinstance(raw_c, dict) else {}
         accounts = iptv_config.get("accounts")
         if not accounts or not isinstance(accounts, list) or len(accounts) == 0:
-            acc_key = iptv_config.get("api_key", "c747279bd5a2284570cd5e888ef182f6")
+            acc_key = iptv_config.get("api_key") or ""
             acc_pack = iptv_config.get("pack") or iptv_config.get("package_id") or iptv_config.get("bouquet") or ""
             acc_url = iptv_config.get("api_url") or ""
             accounts = [{
@@ -738,23 +745,23 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
             "banks_list": banks_list,
             "banks": {
                 "sumup": {
-                    "name": b1.get("name") or "gustave.pro@outlook.fr",
-                    "pay_to_email": b1.get("payToEmail", "gustave.pro@outlook.fr"),
+                    "name": b1.get("name") or "",
+                    "pay_to_email": b1.get("payToEmail") or "",
                     "api_key": b1.get("apiKey", ""),
                     "client_id": b1.get("clientId", ""),
                     "client_secret": b1.get("clientSecret", "")
                 },
                 "sumup_bank2": {
-                    "name": b2.get("name") or "kevin.ebpro@outlook.fr",
-                    "pay_to_email": b2.get("payToEmail", "kevin.ebpro@outlook.fr"),
+                    "name": b2.get("name") or "",
+                    "pay_to_email": b2.get("payToEmail") or "",
                     "api_key": b2.get("apiKey", ""),
                     "client_id": b2.get("clientId", ""),
                     "client_secret": b2.get("clientSecret", "")
                 }
             }
         },
-        "oxapayApiKey": pay_data.get("oxapayApiKey", "UWUEMJ-HAHWDD-IYNN8Z-GDQ94H"),
-        "adminSlug": sec_data.get("adminSlug", "espace-sec-x9k2m7"),
+        "oxapayApiKey": pay_data.get("oxapayApiKey") or "",
+        "adminSlug": sec_data.get("adminSlug") or "",
         "frontendUrl": gen_data.get("frontendUrl", ""),
         "telegramBotToken": gen_data.get("telegramBotToken", ""),
         "apiSecretKey": sec_data.get("apiSecretKey", "")
@@ -1270,3 +1277,172 @@ async def admin_query_database_table(
             "page": page,
             "limit": limit
         }
+
+# =====================================================================
+
+@router.get("/amendes")
+async def admin_get_amendes(
+    status: Optional[str] = None,
+    admin: Any = Depends(get_current_admin)
+):
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        query = """
+            SELECT a.id, a.user_id, a.status, a.price, a.file_urls, a.note,
+                   a.admin_notes, a.created_at, a.updated_at,
+                   u.username, u.first_name, u.last_name, u.balance
+            FROM amendes a
+            LEFT JOIN users u ON a.user_id = u.id
+        """
+        params = []
+        if status and status.upper() != "ALL":
+            query += " WHERE a.status = $1"
+            params.append(status.upper())
+        query += " ORDER BY a.created_at DESC"
+        rows = await conn.fetch(query, *params)
+        results = []
+        for r in rows:
+            raw_urls = r["file_urls"]
+            while isinstance(raw_urls, str):
+                try:
+                    raw_urls = json.loads(raw_urls)
+                except Exception:
+                    raw_urls = []
+            if not isinstance(raw_urls, list):
+                raw_urls = []
+            results.append({
+                "id": str(r["id"]),
+                "user_id": r["user_id"],
+                "username": r["username"] or "",
+                "first_name": r["first_name"] or "",
+                "last_name": r["last_name"] or "",
+                "user_balance": float(r["balance"] or 0),
+                "status": r["status"],
+                "price": float(r["price"]) if r["price"] is not None else None,
+                "file_urls": raw_urls,
+                "note": r["note"] or "",
+                "admin_notes": r["admin_notes"] or "",
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None
+            })
+        return {"amendes": results}
+
+# =====================================================================
+
+@router.post("/amendes/{amende_id}/decision")
+async def admin_amende_decision(
+    amende_id: str,
+    payload: AmendeDecisionPayload,
+    admin: Any = Depends(get_current_admin)
+):
+    try:
+        amende_uuid = UUID(amende_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Identifiant de dossier invalide")
+
+    action = payload.action.strip().lower()
+    admin_notes = payload.adminNotes or payload.admin_notes
+    price = payload.price
+
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        amende = await conn.fetchrow("SELECT * FROM amendes WHERE id = $1", amende_uuid)
+        if not amende:
+            raise HTTPException(status_code=404, detail="Dossier d'amende introuvable")
+
+        raw_maps = amende["telegram_message_ids"]
+        while isinstance(raw_maps, str):
+            try:
+                raw_maps = json.loads(raw_maps)
+            except Exception:
+                raw_maps = []
+        if not isinstance(raw_maps, list):
+            raw_maps = []
+
+        if action == "accept":
+            if price is None or price <= 0:
+                raise HTTPException(status_code=400, detail="Le tarif doit être supérieur à 0 pour accepter.")
+            rounded_price = round(price, 2)
+            await conn.execute("""
+                UPDATE amendes
+                SET status = 'ACCEPTED', price = $1, admin_notes = COALESCE($2, admin_notes), updated_at = NOW()
+                WHERE id = $3
+            """, rounded_price, admin_notes, amende_uuid)
+
+            for m in raw_maps:
+                if m.get("chat_id") and m.get("message_id"):
+                    try:
+                        await edit_telegram_message_text(
+                            chat_id=m["chat_id"],
+                            message_id=m["message_id"],
+                            text=f"✅ <b>Dossier validé via le panel</b> (<code>{amende_id}</code>) au tarif de <b>{rounded_price:.2f} €</b>."
+                        )
+                    except Exception:
+                        pass
+
+            try:
+                await send_telegram_message(
+                    chat_id=amende["user_id"],
+                    text=(
+                        f"✅ <b>Votre dossier d'annulation d'amende a été accepté !</b>\n\n"
+                        f"<b>Dossier</b> : <code>{amende_id}</code>\n"
+                        f"<b>Montant fixé</b> : <b>{rounded_price:.2f} €</b>\n\n"
+                        f"Vous pouvez dès à présent régler ce dossier depuis l'application en débitant votre solde."
+                    ),
+                    reply_markup={"inline_keyboard": [[{"text": "💳 Payer dans l'application", "web_app": {"url": settings.frontend_url}}]]}
+                )
+            except Exception:
+                pass
+
+            return {"success": True, "status": "ACCEPTED", "price": rounded_price}
+
+        elif action == "reject":
+            await conn.execute("""
+                UPDATE amendes
+                SET status = 'REJECTED', admin_notes = COALESCE($1, admin_notes), updated_at = NOW()
+                WHERE id = $2
+            """, admin_notes, amende_uuid)
+
+            for m in raw_maps:
+                if m.get("chat_id") and m.get("message_id"):
+                    try:
+                        await edit_telegram_message_text(
+                            chat_id=m["chat_id"],
+                            message_id=m["message_id"],
+                            text=f"❌ <b>Dossier refusé via le panel</b> (<code>{amende_id}</code>)."
+                        )
+                    except Exception:
+                        pass
+
+            try:
+                await send_telegram_message(
+                    chat_id=amende["user_id"],
+                    text=f"❌ <b>Information Dossier d'Amende</b>\nVotre dossier <code>{amende_id}</code> ne peut malheureusement pas être pris en charge et a été refusé."
+                )
+            except Exception:
+                pass
+
+            return {"success": True, "status": "REJECTED"}
+
+        elif action in ("finish", "termine"):
+            await conn.execute("""
+                UPDATE amendes
+                SET status = 'FINISHED', admin_notes = COALESCE($1, admin_notes), updated_at = NOW()
+                WHERE id = $2
+            """, admin_notes, amende_uuid)
+
+            for m in raw_maps:
+                if m.get("chat_id") and m.get("message_id"):
+                    try:
+                        await edit_telegram_message_text(
+                            chat_id=m["chat_id"],
+                            message_id=m["message_id"],
+                            text=f"🏁 <b>Dossier clôturé</b> (<code>{amende_id}</code>)."
+                        )
+                    except Exception:
+                        pass
+
+            return {"success": True, "status": "FINISHED"}
+
+        else:
+            raise HTTPException(status_code=400, detail=f"Action '{action}' non reconnue")

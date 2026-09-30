@@ -32,7 +32,7 @@ class Settings:
         self.frontend_url: str = ""
         self.telegram_bot_token: str = ""
         self.internal_api_secret: str = ""
-        self.bot_name: str = "ChezRheyy"
+        self.bot_name: str = ""
         self.support_telegram: str = ""
         self.channel_telegram: str = ""
         self.backend_url: str = ""
@@ -78,7 +78,7 @@ class Settings:
             self.frontend_url = str(f_url).strip()
             self.telegram_bot_token = str(tg_token).strip()
             self.internal_api_secret = str(api_sec).strip()
-            self.bot_name = str(general.get("botName") or "ChezRheyy").strip()
+            self.bot_name = str(general.get("botName") or "").strip()
             self.support_telegram = str(general.get("supportTelegram") or "").strip()
             self.channel_telegram = str(general.get("channelTelegram") or "").strip()
             self.backend_url = str(general.get("backendUrl") or "").strip()
