@@ -17,6 +17,12 @@ from app.config import settings
 from app.db import get_db_pool
 from app.services.iptv_panel import get_reseller_panel_stats
 from app.services.telegram import send_telegram_message, edit_telegram_message_text
+from app.services.cache import (
+    get_cached_settings,
+    invalidate_settings,
+    invalidate_service,
+    invalidate_active_admins
+)
 from app.version import get_git_info
 
 # =====================================================================
@@ -162,15 +168,11 @@ def _is_valid_session(token: str) -> bool:
 
 async def _get_admin_password_hash() -> str:
     try:
-        pool = await get_db_pool()
-        async with pool.acquire() as conn:
-            s_row = await conn.fetchrow("SELECT security FROM settings WHERE id = 'global'")
-            if s_row and s_row["security"]:
-                raw_s = s_row["security"]
-                while isinstance(raw_s, str):
-                    raw_s = json.loads(raw_s)
-                if isinstance(raw_s, dict) and raw_s.get("adminPasswordHash"):
-                    return str(raw_s["adminPasswordHash"])
+        s_data = await get_cached_settings()
+        if s_data and s_data.get("security"):
+            raw_s = s_data["security"]
+            if isinstance(raw_s, dict) and raw_s.get("adminPasswordHash"):
+                return str(raw_s["adminPasswordHash"])
     except Exception:
         pass
     if ADMIN_PASSWORD.strip():
@@ -528,6 +530,7 @@ async def admin_toggle_ban(payload: UserBanPayload, admin: Any = Depends(get_cur
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE users SET is_banned = $1, updated_at = NOW() WHERE id = $2", is_banned, uid)
+    invalidate_active_admins()
     return {"success": True}
 
 # =====================================================================
@@ -544,6 +547,7 @@ async def admin_toggle_admin(payload: UserAdminPayload, admin: Any = Depends(get
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE users SET admin = $1, updated_at = NOW() WHERE id = $2", payload.admin, uid)
+    invalidate_active_admins()
     return {"success": True}
 
 # =====================================================================
@@ -560,6 +564,7 @@ async def admin_delete_user(payload: UserDeletePayload, admin: Any = Depends(get
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM users WHERE id = $1", uid)
+    invalidate_active_admins()
     return {"success": True}
 
 # =====================================================================
@@ -832,6 +837,7 @@ async def admin_save_iptv(payload: IptvSettingsPayload, admin: Any = Depends(get
             "UPDATE services SET prices = $1, config = $2 WHERE slug = 'iptv'",
             json.dumps(prices), json.dumps(config)
         )
+    invalidate_service("iptv")
     return {"success": True}
 
 # =====================================================================
@@ -985,6 +991,7 @@ async def admin_save_sumup(payload: SumUpSettingsPayload, admin: Any = Depends(g
             "UPDATE settings SET payments = $1 WHERE id = 'global'",
             json.dumps(pay_data)
         )
+    invalidate_settings()
     return {"success": True, "bank": payload.active}
 
 # =====================================================================
@@ -1025,6 +1032,7 @@ async def admin_set_maintenance(payload: MaintenancePayload, admin: Any = Depend
             "UPDATE settings SET general = $1 WHERE id = 'global'",
             json.dumps(gen_data)
         )
+        invalidate_settings()
         await settings.load_from_db(conn)
     return {"success": True, "maintenance": payload.maintenance}
 
@@ -1050,6 +1058,7 @@ async def admin_set_password(payload: PasswordPayload, admin: Any = Depends(get_
             sec_data = raw_s if isinstance(raw_s, dict) else {}
         sec_data["adminPasswordHash"] = new_hash
         await conn.execute("UPDATE settings SET security = $1 WHERE id = 'global'", json.dumps(sec_data))
+        invalidate_settings()
         await settings.load_from_db(conn)
     new_token = _generate_admin_token()
     return {"success": True, "token": new_token}
@@ -1072,6 +1081,7 @@ async def admin_set_oxapay_key(payload: OxaPayPayload, admin: Any = Depends(get_
             pay_data = raw_p if isinstance(raw_p, dict) else {}
         pay_data["oxapayApiKey"] = api_key
         await conn.execute("UPDATE settings SET payments = $1 WHERE id = 'global'", json.dumps(pay_data))
+        invalidate_settings()
     return {"success": True}
 
 # =====================================================================
@@ -1100,6 +1110,7 @@ async def admin_save_general(payload: GeneralSettingsPayload, admin: Any = Depen
         if payload.maintenanceMode is not None:
             gen_data["maintenanceMode"] = payload.maintenanceMode
         await conn.execute("UPDATE settings SET general = $1 WHERE id = 'global'", json.dumps(gen_data))
+        invalidate_settings()
         await settings.load_from_db(conn)
     return {"success": True}
 
@@ -1125,6 +1136,7 @@ async def admin_save_security(payload: SecuritySettingsPayload, admin: Any = Dep
         if payload.adminSlug is not None:
             sec_data["adminSlug"] = payload.adminSlug.strip()
         await conn.execute("UPDATE settings SET security = $1 WHERE id = 'global'", json.dumps(sec_data))
+        invalidate_settings()
         await settings.load_from_db(conn)
     return {"success": True}
 

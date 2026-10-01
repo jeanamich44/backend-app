@@ -13,6 +13,7 @@ from app.services.telegram import (
     send_telegram_message,
     send_telegram_media_group
 )
+from app.services.cache import get_cached_service, get_cached_active_admins
 
 # =====================================================================
 
@@ -85,10 +86,7 @@ async def _notify_admins_new_amende(
     reply_markup: Dict[str, Any],
     telegram_files: List[Tuple[str, bytes, str]]
 ) -> None:
-    pool = await get_db_pool()
-    async with pool.acquire() as conn:
-        admin_rows = await conn.fetch("SELECT id FROM users WHERE admin = TRUE AND is_banned = FALSE")
-
+    admin_rows = await get_cached_active_admins()
     if not admin_rows:
         return
 
@@ -113,6 +111,7 @@ async def _notify_admins_new_amende(
             pass
 
     if msg_mappings:
+        pool = await get_db_pool()
         async with pool.acquire() as conn:
             await conn.execute(
                 "UPDATE amendes SET telegram_message_ids = $1 WHERE id = $2",
@@ -128,6 +127,13 @@ async def submit_amende(
     note: Optional[str] = Form(None),
     user: Dict[str, Any] = Depends(get_current_user)
 ):
+    service_info = await get_cached_service("amendes")
+    if service_info and not service_info.get("is_active"):
+        raise HTTPException(
+            status_code=403,
+            detail="Le service d'annulation d'amende est temporairement suspendu."
+        )
+
     if not files or len(files) == 0:
         raise HTTPException(status_code=400, detail="Veuillez fournir au moins un fichier.")
     if len(files) > 4:
@@ -286,7 +292,7 @@ async def pay_amende(
             new_bal_row = await conn.fetchval("SELECT balance FROM users WHERE id = $1", user_id)
             new_balance = float(new_bal_row or 0)
 
-            admin_rows = await conn.fetch("SELECT id FROM users WHERE admin = TRUE AND is_banned = FALSE")
+    admin_rows = await get_cached_active_admins()
 
     client_display = f"@{user['username']}" if user.get("username") else f"{user.get('first_name', '')} (<code>{user_id}</code>)"
     admin_notify_text = (

@@ -7,6 +7,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, Tuple
 from fastapi import HTTPException
 from app.db import get_db_pool
+from app.services.cache import get_cached_settings
 
 # =====================================================================
 
@@ -18,57 +19,52 @@ _token_cache: Dict[str, Tuple[str, float]] = {}
 # =====================================================================
 
 async def get_payment_settings(requested_bank: Optional[str] = None) -> Tuple[Dict[str, str], int, str]:
-    pool = await get_db_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT payments FROM settings WHERE id = 'global'")
-        if not row or not row["payments"]:
-            raise HTTPException(status_code=500, detail="Table settings colonne payments absente")
+    settings_data = await get_cached_settings()
+    if not settings_data or not settings_data.get("payments"):
+        raise HTTPException(status_code=500, detail="Table settings colonne payments absente")
 
-        pay_data = row["payments"]
-        while isinstance(pay_data, str):
-            pay_data = json.loads(pay_data)
+    pay_data = settings_data["payments"]
+    if not isinstance(pay_data, dict):
+        raise HTTPException(status_code=500, detail="Format JSON payments non conforme")
 
-        if not isinstance(pay_data, dict):
-            raise HTTPException(status_code=500, detail="Format JSON payments non conforme")
+    active_bank = str(pay_data.get("activeBank") or "bank2").strip()
+    bank_name = requested_bank if requested_bank in ("bank1", "bank2") else active_bank
 
-        active_bank = str(pay_data.get("activeBank") or "bank2").strip()
-        bank_name = requested_bank if requested_bank in ("bank1", "bank2") else active_bank
-
-        raw_exp = pay_data.get("expirationMinutes")
-        try:
-            exp_minutes = int(raw_exp)
-            if exp_minutes <= 0:
-                exp_minutes = 15
-        except (TypeError, ValueError):
+    raw_exp = pay_data.get("expirationMinutes")
+    try:
+        exp_minutes = int(raw_exp)
+        if exp_minutes <= 0:
             exp_minutes = 15
+    except (TypeError, ValueError):
+        exp_minutes = 15
 
-        bank_obj = pay_data.get(bank_name)
-        if not isinstance(bank_obj, dict):
-            b_list = pay_data.get("banks_list", [])
-            if isinstance(b_list, list):
-                bank_obj = next((b for b in b_list if isinstance(b, dict) and b.get("id") == bank_name), None)
+    bank_obj = pay_data.get(bank_name)
+    if not isinstance(bank_obj, dict):
+        b_list = pay_data.get("banks_list", [])
+        if isinstance(b_list, list):
+            bank_obj = next((b for b in b_list if isinstance(b, dict) and b.get("id") == bank_name), None)
 
-        if not isinstance(bank_obj, dict):
-            bank_obj = pay_data.get("bank2") or pay_data.get("bank1")
+    if not isinstance(bank_obj, dict):
+        bank_obj = pay_data.get("bank2") or pay_data.get("bank1")
 
-        if not isinstance(bank_obj, dict):
-            raise HTTPException(status_code=500, detail=f"Configuration de {bank_name} absente en base")
+    if not isinstance(bank_obj, dict):
+        raise HTTPException(status_code=500, detail=f"Configuration de {bank_name} absente en base")
 
-        pay_to_email = bank_obj.get("payToEmail")
-        client_id = bank_obj.get("clientId")
-        client_secret = bank_obj.get("clientSecret")
-        api_key = bank_obj.get("apiKey")
+    pay_to_email = bank_obj.get("payToEmail")
+    client_id = bank_obj.get("clientId")
+    client_secret = bank_obj.get("clientSecret")
+    api_key = bank_obj.get("apiKey")
 
-        if not pay_to_email or not client_id or not client_secret:
-            raise HTTPException(status_code=500, detail=f"Identifiants {bank_name} incomplets en base")
+    if not pay_to_email or not client_id or not client_secret:
+        raise HTTPException(status_code=500, detail=f"Identifiants {bank_name} incomplets en base")
 
-        config = {
-            "pay_to_email": str(pay_to_email).strip(),
-            "client_id": str(client_id).strip(),
-            "client_secret": str(client_secret).strip(),
-            "api_key": str(api_key).strip() if api_key else "",
-        }
-        return config, exp_minutes, bank_name
+    config = {
+        "pay_to_email": str(pay_to_email).strip(),
+        "client_id": str(client_id).strip(),
+        "client_secret": str(client_secret).strip(),
+        "api_key": str(api_key).strip() if api_key else "",
+    }
+    return config, exp_minutes, bank_name
 
 # =====================================================================
 

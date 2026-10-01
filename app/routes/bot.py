@@ -17,6 +17,12 @@ from app.services.telegram import (
     edit_telegram_message_text,
     answer_callback_query
 )
+from app.services.cache import (
+    get_cached_active_admins,
+    invalidate_settings,
+    invalidate_service,
+    invalidate_active_admins
+)
 
 # =====================================================================
 
@@ -154,7 +160,7 @@ def _escape_html(text: Any) -> str:
     return html.escape(str(text))
 
 async def _notify_admins(conn: Any, text: str, exclude_id: Optional[int] = None) -> None:
-    admin_rows = await conn.fetch("SELECT id FROM users WHERE admin = TRUE AND is_banned = FALSE")
+    admin_rows = await get_cached_active_admins()
     for r in admin_rows:
         aid = r["id"]
         if exclude_id and aid == exclude_id:
@@ -262,6 +268,7 @@ async def _handle_ban(chat_id: int, args: List[str], conn: Any) -> None:
         VALUES ($1, TRUE, NOW())
         ON CONFLICT (id) DO UPDATE SET is_banned = TRUE, updated_at = NOW()
     """, target_id)
+    invalidate_active_admins()
 
     await conn.execute(
         "INSERT INTO bot_logs (id, user_id, action, details, created_at) VALUES ($1, $2, 'BAN', $3, NOW())",
@@ -285,6 +292,7 @@ async def _handle_deban(chat_id: int, args: List[str], conn: Any) -> None:
         return
 
     await conn.execute("UPDATE users SET is_banned = FALSE, updated_at = NOW() WHERE id = $1", target_id)
+    invalidate_active_admins()
     await conn.execute(
         "INSERT INTO bot_logs (id, user_id, action, details, created_at) VALUES ($1, $2, 'DEBAN', '{}', NOW())",
         uuid.uuid4(), target_id
@@ -545,6 +553,7 @@ async def _handle_maintenance(chat_id: int, args: List[str], conn: Any) -> None:
 
     gen_data["maintenanceMode"] = new_state
     await conn.execute("UPDATE settings SET general = $1 WHERE id = 'global'", json.dumps(gen_data))
+    invalidate_settings()
     await settings.load_from_db(conn)
 
     status_text = "ACTIVÉ 🔴" if new_state else "DÉSACTIVÉ 🟢"
@@ -596,6 +605,7 @@ async def _handle_bank(chat_id: int, args: List[str], conn: Any) -> None:
     if choice in ("1", "bank1", "sumup"):
         pay_data["activeBank"] = "bank1"
         await conn.execute("UPDATE settings SET payments = $1 WHERE id = 'global'", json.dumps(pay_data))
+        invalidate_settings()
         await send_telegram_message(
             chat_id,
             f"✅ <b>Banque SumUp modifiée !</b>\n\nCompte actif : <b>{_escape_html(b1_name)}</b>\nE-mail : <code>{_escape_html(b1_email)}</code>"
@@ -603,6 +613,7 @@ async def _handle_bank(chat_id: int, args: List[str], conn: Any) -> None:
     elif choice in ("2", "bank2", "sumup_bank2"):
         pay_data["activeBank"] = "bank2"
         await conn.execute("UPDATE settings SET payments = $1 WHERE id = 'global'", json.dumps(pay_data))
+        invalidate_settings()
         await send_telegram_message(
             chat_id,
             f"✅ <b>Banque SumUp modifiée !</b>\n\nCompte actif : <b>{_escape_html(b2_name)}</b>\nE-mail : <code>{_escape_html(b2_email)}</code>"
@@ -660,6 +671,7 @@ async def _handle_compteapi(chat_id: int, args: List[str], conn: Any) -> None:
         config["api_url"] = active_acc.get("api_url")
 
     await conn.execute("UPDATE services SET config = $1 WHERE slug = 'iptv'", json.dumps(config))
+    invalidate_service("iptv")
     lbl = _escape_html(active_acc.get("name") or f"Compte {target_idx + 1}")
     await send_telegram_message(chat_id, f"✅ Compte API actif : <b>{lbl}</b>")
 
@@ -709,6 +721,7 @@ async def _handle_comptepanel(chat_id: int, args: List[str], conn: Any) -> None:
     config["password"] = active_p.get("password", "")
 
     await conn.execute("UPDATE services SET config = $1 WHERE slug = 'iptv'", json.dumps(config))
+    invalidate_service("iptv")
     lbl = _escape_html(active_p.get("name") or active_p.get("username") or f"Compte {target_idx + 1}")
     await send_telegram_message(chat_id, f"✅ Compte panel actif : <b>{lbl}</b>")
 
@@ -746,6 +759,7 @@ async def _handle_demoiptv(chat_id: int, args: List[str], conn: Any) -> None:
 
     config["demo_enabled"] = new_state
     await conn.execute("UPDATE services SET config = $1 WHERE slug = 'iptv'", json.dumps(config))
+    invalidate_service("iptv")
     status_text = "ACTIVÉES 🟢" if new_state else "DÉSACTIVÉES 🔴"
     await send_telegram_message(chat_id, f"📺 Achats démo IPTV : <b>{status_text}</b>")
 
