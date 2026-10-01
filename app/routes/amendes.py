@@ -3,8 +3,8 @@ import re
 import json
 import html
 import uuid
-from typing import Optional, Dict, Any, List
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Header
+from typing import Optional, Dict, Any, List, Tuple
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Header, BackgroundTasks
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from app.auth import get_current_user, validate_telegram_init_data
@@ -79,8 +79,51 @@ async def list_user_amendes(user: Dict[str, Any] = Depends(get_current_user)):
 
 # =====================================================================
 
+async def _notify_admins_new_amende(
+    amende_id: uuid.UUID,
+    decision_text: str,
+    reply_markup: Dict[str, Any],
+    telegram_files: List[Tuple[str, bytes, str]]
+) -> None:
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        admin_rows = await conn.fetch("SELECT id FROM users WHERE admin = TRUE AND is_banned = FALSE")
+
+    if not admin_rows:
+        return
+
+    msg_mappings: List[Dict[str, Any]] = []
+    uploaded_media = None
+    for r in admin_rows:
+        aid = r["id"]
+        try:
+            if telegram_files:
+                if not uploaded_media:
+                    uploaded_media = await send_telegram_media_group(aid, files_list=telegram_files)
+                else:
+                    await send_telegram_media_group(aid, file_ids=uploaded_media)
+            res = await send_telegram_message(
+                chat_id=aid,
+                text=decision_text,
+                reply_markup=reply_markup
+            )
+            if res and "message_id" in res:
+                msg_mappings.append({"chat_id": aid, "message_id": res["message_id"]})
+        except Exception:
+            pass
+
+    if msg_mappings:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE amendes SET telegram_message_ids = $1 WHERE id = $2",
+                json.dumps(msg_mappings), amende_id
+            )
+
+# =====================================================================
+
 @router.post("/submit")
 async def submit_amende(
+    background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     note: Optional[str] = Form(None),
     user: Dict[str, Any] = Depends(get_current_user)
@@ -94,7 +137,7 @@ async def submit_amende(
     sanitized_note = (note or "").strip()[:200]
 
     saved_urls: List[str] = []
-    telegram_files: List[tuple[str, bytes, str]] = []
+    telegram_files: List[Tuple[str, bytes, str]] = []
 
     for f in files:
         ext = os.path.splitext(f.filename or "")[1].lower()
@@ -133,8 +176,6 @@ async def submit_amende(
             VALUES ($1, $2, 'PENDING', $3, $4, '[]'::jsonb, NOW(), NOW())
         """, amende_id, user_id, json.dumps(saved_urls), sanitized_note)
 
-        admin_rows = await conn.fetch("SELECT id FROM users WHERE admin = TRUE AND is_banned = FALSE")
-
     client_str = f"@{user['username']}" if user.get("username") else f"{user.get('first_name', '')} (ID: <code>{user_id}</code>)"
     safe_note = html.escape(sanitized_note) if sanitized_note else "<i>Aucune</i>"
     decision_text = (
@@ -155,29 +196,13 @@ async def submit_amende(
         ]
     }
 
-    msg_mappings: List[Dict[str, Any]] = []
-
-    for r in admin_rows:
-        aid = r["id"]
-        try:
-            if telegram_files:
-                await send_telegram_media_group(aid, telegram_files)
-            res = await send_telegram_message(
-                chat_id=aid,
-                text=decision_text,
-                reply_markup=reply_markup
-            )
-            if res and "message_id" in res:
-                msg_mappings.append({"chat_id": aid, "message_id": res["message_id"]})
-        except Exception:
-            pass
-
-    if msg_mappings:
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE amendes SET telegram_message_ids = $1 WHERE id = $2",
-                json.dumps(msg_mappings), amende_id
-            )
+    background_tasks.add_task(
+        _notify_admins_new_amende,
+        amende_id,
+        decision_text,
+        reply_markup,
+        telegram_files
+    )
 
     return {
         "success": True,
@@ -187,9 +212,19 @@ async def submit_amende(
 
 # =====================================================================
 
+async def _notify_admins_payment(admin_ids: List[int], text: str) -> None:
+    for aid in admin_ids:
+        try:
+            await send_telegram_message(chat_id=aid, text=text)
+        except Exception:
+            pass
+
+# =====================================================================
+
 @router.post("/pay")
 async def pay_amende(
     payload: PayAmendePayload,
+    background_tasks: BackgroundTasks,
     user: Dict[str, Any] = Depends(get_current_user)
 ):
     target_id_str = payload.amendeId or payload.amende_id
@@ -263,11 +298,8 @@ async def pay_amende(
         f"<i>Le traitement de l'annulation peut commencer.</i>"
     )
 
-    for r in admin_rows:
-        try:
-            await send_telegram_message(chat_id=r["id"], text=admin_notify_text)
-        except Exception:
-            pass
+    admin_ids = [r["id"] for r in admin_rows]
+    background_tasks.add_task(_notify_admins_payment, admin_ids, admin_notify_text)
 
     return {
         "success": True,
