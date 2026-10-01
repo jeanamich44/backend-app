@@ -16,10 +16,13 @@ from app.version import get_git_info
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    print("[STARTUP] Demarrage du cycle de vie de l'application...", flush=True)
     await init_db()
     if settings.frontend_url and settings.frontend_url not in origins:
         origins.append(settings.frontend_url)
+    print("[STARTUP] Initialisation terminee avec succes. Serveur pret.", flush=True)
     yield
+    print("[SHUTDOWN] Arret de l'application et fermeture du pool BDD...", flush=True)
     await close_db()
 
 # =====================================================================

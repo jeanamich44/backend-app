@@ -10,12 +10,12 @@ db_pool: Optional[asyncpg.Pool] = None
 # =====================================================================
 
 def _get_ssl_context() -> Optional[ssl.SSLContext]:
-    if "aivencloud" in settings.database_url or "sslmode=require" in settings.database_url:
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        return ctx
-    return None
+    if "localhost" in settings.database_url or "127.0.0.1" in settings.database_url:
+        return None
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
 
 # =====================================================================
 
@@ -23,13 +23,16 @@ async def init_db() -> asyncpg.Pool:
     global db_pool
     if db_pool is None:
         ssl_ctx = _get_ssl_context()
+        print(f"[DB] Connexion pool asyncpg (SSL={'OUI' if ssl_ctx else 'NON'})...", flush=True)
         db_pool = await asyncpg.create_pool(
             settings.database_url,
             min_size=1,
             max_size=5,
             ssl=ssl_ctx,
+            timeout=15,
             command_timeout=60
         )
+        print("[DB] Pool cree, execution du schema...", flush=True)
         async with db_pool.acquire() as conn:
             await conn.execute("""
                 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
@@ -119,7 +122,10 @@ async def init_db() -> asyncpg.Pool:
                 VALUES ('global', '{}', '{}', '{}')
                 ON CONFLICT (id) DO NOTHING;
             """)
+        print("[DB] Schema verifie avec succes.", flush=True)
+    print("[DB] Chargement de la configuration dynamique depuis la BDD...", flush=True)
     await settings.load_from_db(db_pool)
+    print("[DB] Configuration chargee avec succes.", flush=True)
     return db_pool
 
 # =====================================================================
