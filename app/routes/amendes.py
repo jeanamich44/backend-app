@@ -62,12 +62,13 @@ async def list_user_amendes(user: Dict[str, Any] = Depends(get_current_user)):
                     raw_urls = []
             if not isinstance(raw_urls, list):
                 raw_urls = []
+            clean_urls = [u.replace("/api/amendes/file/", "/api/proxy/amendes/file/") for u in raw_urls]
 
             amendes.append({
                 "id": str(r["id"]),
                 "status": r["status"],
                 "price": float(r["price"]) if r["price"] is not None else None,
-                "file_urls": raw_urls,
+                "file_urls": clean_urls,
                 "note": r["note"] or "",
                 "admin_notes": r["admin_notes"] or "",
                 "created_at": r["created_at"].isoformat() if r["created_at"] else None,
@@ -117,7 +118,7 @@ async def submit_amende(
         with open(target_path, "wb") as out_f:
             out_f.write(content)
 
-        file_url = f"/api/amendes/file/{unique_name}"
+        file_url = f"/api/proxy/amendes/file/{unique_name}"
         saved_urls.append(file_url)
 
         mime = f.content_type or ("application/pdf" if ext == ".pdf" else "image/jpeg")
@@ -282,6 +283,9 @@ async def get_amende_file(
     x_telegram_init_data: Optional[str] = Header(None, alias="X-Telegram-Init-Data"),
     authorization: Optional[str] = Header(None, alias="Authorization")
 ):
+    if not x_telegram_init_data and not authorization:
+        raise HTTPException(status_code=401, detail="Authentification requise.")
+
     if not re.match(r"^[a-zA-Z0-9_\-\.]+$", filename):
         raise HTTPException(status_code=400, detail="Nom de fichier invalide.")
 
@@ -289,4 +293,7 @@ async def get_amende_file(
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Fichier introuvable.")
 
-    return FileResponse(file_path, filename=filename)
+    ext = os.path.splitext(filename)[1].lower()
+    media_type = "application/pdf" if ext == ".pdf" else "image/jpeg" if ext in (".jpg", ".jpeg") else "image/png" if ext == ".png" else "application/octet-stream"
+
+    return FileResponse(file_path, media_type=media_type, content_disposition_type="inline")

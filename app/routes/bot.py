@@ -1125,11 +1125,17 @@ async def telegram_webhook(
 
         is_admin = bool(user_row and user_row["admin"] is True)
 
-        if is_admin and not text.startswith("/"):
-            state_row = await conn.fetchrow("SELECT * FROM bot_states WHERE chat_id = $1", chat_id)
-            if state_row and state_row["state"] == "WAITING_FOR_PRICE":
-                await _handle_amende_price_input(chat_id, text, state_row, conn)
+        if is_admin:
+            if text in ("/cancel", "/annuler"):
+                await conn.execute("DELETE FROM bot_states WHERE chat_id = $1", chat_id)
+                await send_telegram_message(chat_id=chat_id, text="Opération en cours annulée.")
                 return {"ok": True}
+
+            if not text.startswith("/"):
+                state_row = await conn.fetchrow("SELECT * FROM bot_states WHERE chat_id = $1", chat_id)
+                if state_row and state_row["state"] == "WAITING_FOR_PRICE":
+                    await _handle_amende_price_input(chat_id, text, state_row, conn)
+                    return {"ok": True}
 
         if not is_admin:
             if text.startswith("/start"):
