@@ -448,32 +448,33 @@ async def cancel_checkout(user_id: int) -> Dict[str, Any]:
             user_id
         )
 
-        if not payment:
-            print(f"[RENDER SUMUP CANCEL] Aucune facture PENDING trouvée pour user {user_id}", flush=True)
-            raise HTTPException(status_code=404, detail="Aucune facture en attente à annuler.")
+    if not payment:
+        print(f"[RENDER SUMUP CANCEL] Aucune facture PENDING trouvée pour user {user_id}", flush=True)
+        raise HTTPException(status_code=404, detail="Aucune facture en attente à annuler.")
 
-        checkout_id = payment["checkout_id"]
-        payload = payment["sumup_payload"]
-        bank_name = "bank2"
-        if isinstance(payload, str):
-            try:
-                payload = json.loads(payload)
-            except Exception:
-                payload = {}
-        if isinstance(payload, dict) and payload.get("bank"):
-            bank_name = payload["bank"]
-
+    checkout_id = payment["checkout_id"]
+    payload = payment["sumup_payload"]
+    bank_name = "bank2"
+    if isinstance(payload, str):
         try:
-            token = await get_sumup_access_token(bank_name)
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                res = await client.delete(
-                    f"{SUMUP_API_BASE}/v0.1/checkouts/{checkout_id}",
-                    headers={"Authorization": f"Bearer {token}"}
-                )
-                print(f"[RENDER SUMUP CANCEL API] Statut API DELETE: {res.status_code}", flush=True)
-        except Exception as ex:
-            print(f"[RENDER SUMUP CANCEL API ERREUR] {str(ex)}", flush=True)
+            payload = json.loads(payload)
+        except Exception:
+            payload = {}
+    if isinstance(payload, dict) and payload.get("bank"):
+        bank_name = payload["bank"]
 
+    try:
+        token = await get_sumup_access_token(bank_name)
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            res = await client.delete(
+                f"{SUMUP_API_BASE}/v0.1/checkouts/{checkout_id}",
+                headers={"Authorization": f"Bearer {token}"}
+            )
+            print(f"[RENDER SUMUP CANCEL API] Statut API DELETE: {res.status_code}", flush=True)
+    except Exception as ex:
+        print(f"[RENDER SUMUP CANCEL API ERREUR] {str(ex)}", flush=True)
+
+    async with pool.acquire() as conn:
         await conn.execute(
             """
             UPDATE payments

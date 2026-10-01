@@ -337,13 +337,9 @@ async def admin_stats(admin: Any = Depends(get_current_admin)):
             pass
 
         try:
-            s_row = await conn.fetchrow("SELECT general FROM settings WHERE id = 'global'")
-            if s_row and s_row["general"]:
-                raw_g = s_row["general"]
-                while isinstance(raw_g, str):
-                    raw_g = json.loads(raw_g)
-                if isinstance(raw_g, dict):
-                    maintenance_mode = bool(raw_g.get("maintenanceMode", False))
+            s_data = await get_cached_settings()
+            if s_data and s_data.get("general"):
+                maintenance_mode = bool(s_data["general"].get("maintenanceMode", False))
         except Exception:
             pass
 
@@ -468,8 +464,14 @@ async def admin_get_users(admin: Any = Depends(get_current_admin)):
         async with pool.acquire() as conn:
             rows = await conn.fetch("""
                 SELECT u.id, u.username, u.first_name, u.balance, u.is_banned, u.admin, u.created_at,
-                       COALESCE((SELECT COUNT(*) FROM payments WHERE user_id = u.id AND status = 'PAID'), 0) as achats
+                       COALESCE(p.achats, 0) as achats
                 FROM users u
+                LEFT JOIN (
+                    SELECT user_id, COUNT(*) as achats
+                    FROM payments
+                    WHERE status = 'PAID'
+                    GROUP BY user_id
+                ) p ON p.user_id = u.id
                 ORDER BY u.created_at DESC
             """)
             users = [

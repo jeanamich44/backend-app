@@ -484,6 +484,10 @@ async def buy_iptv_demo(user: Dict[str, Any] = Depends(get_current_user)):
     async with pool.acquire() as conn:
         async with conn.transaction():
             if demo_price > 0:
+                user_row = await conn.fetchrow("SELECT balance FROM users WHERE id = $1 FOR UPDATE", user_id)
+                current_bal = float(user_row["balance"] or 0) if user_row else 0.0
+                if current_bal < demo_price:
+                    raise HTTPException(status_code=400, detail="Solde insuffisant au moment du débit")
                 await conn.execute("UPDATE users SET balance = balance - $1, updated_at = NOW() WHERE id = $2", demo_price, user_id)
             await conn.execute("""
                 INSERT INTO transactions (user_id, brand, code, pin, value, price, notes, created_at)
