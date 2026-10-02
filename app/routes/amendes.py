@@ -128,7 +128,7 @@ async def submit_amende(
     user: Dict[str, Any] = Depends(get_current_user)
 ):
     service_info = await get_cached_service("amendes")
-    if service_info and not service_info.get("is_active"):
+    if not service_info or not service_info.get("is_active"):
         raise HTTPException(
             status_code=403,
             detail="Le service d'annulation d'amende est temporairement suspendu."
@@ -233,6 +233,13 @@ async def pay_amende(
     background_tasks: BackgroundTasks,
     user: Dict[str, Any] = Depends(get_current_user)
 ):
+    service_info = await get_cached_service("amendes")
+    if not service_info or not service_info.get("is_active"):
+        raise HTTPException(
+            status_code=403,
+            detail="Le service d'annulation d'amende est temporairement suspendu."
+        )
+
     target_id_str = payload.amendeId or payload.amende_id
     if not target_id_str:
         raise HTTPException(status_code=400, detail="ID de dossier manquant.")

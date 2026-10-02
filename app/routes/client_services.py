@@ -70,8 +70,20 @@ def _extract_url_from_response(text: str) -> str:
 
 # =====================================================================
 
+@router.get("/services/status")
+async def get_services_status(user: Dict[str, Any] = Depends(get_current_user)):
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT slug, is_active FROM services")
+        return {r["slug"]: bool(r["is_active"]) for r in rows}
+
+# =====================================================================
+
 @router.get("/carrefour/stock")
 async def get_carrefour_stock(user: Dict[str, Any] = Depends(get_current_user)):
+    service_info = await get_cached_service("carrefour")
+    if not service_info or not service_info.get("is_active"):
+        raise HTTPException(status_code=403, detail="Le service Carrefour est temporairement indisponible.")
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
@@ -100,6 +112,9 @@ async def buy_carrefour_card(
     payload: CarrefourBuyPayload,
     user: Dict[str, Any] = Depends(get_current_user)
 ):
+    service_info = await get_cached_service("carrefour")
+    if not service_info or not service_info.get("is_active"):
+        raise HTTPException(status_code=403, detail="Le service Carrefour est temporairement indisponible.")
     user_id = user["id"]
     pool = await get_db_pool()
     async with pool.acquire() as conn:
@@ -203,9 +218,8 @@ async def get_my_carrefour_cards(user: Dict[str, Any] = Depends(get_current_user
 @router.get("/iptv/prices")
 async def get_iptv_public_prices(user: Dict[str, Any] = Depends(get_current_user)):
     service_data = await get_cached_service("iptv")
-    if not service_data:
-        logger.error("Service IPTV introuvable en DB dans services")
-        raise HTTPException(status_code=500, detail="Configuration IPTV non disponible")
+    if not service_data or not service_data.get("is_active"):
+        raise HTTPException(status_code=403, detail="Le service IPTV est temporairement indisponible.")
 
     prices = service_data.get("prices") or {}
     config = service_data.get("config") or {}
@@ -279,8 +293,8 @@ async def buy_iptv_subscription(
         raise HTTPException(status_code=400, detail="Durée d'abonnement non supportée (1, 3, 6, 12 mois)")
 
     service_data = await get_cached_service("iptv")
-    if not service_data:
-        raise HTTPException(status_code=500, detail="Configuration IPTV non disponible")
+    if not service_data or not service_data.get("is_active"):
+        raise HTTPException(status_code=403, detail="Le service IPTV est temporairement indisponible.")
 
     prices = service_data.get("prices") or {}
     config = service_data.get("config") or {}
@@ -411,8 +425,8 @@ async def buy_iptv_subscription(
 async def buy_iptv_demo(user: Dict[str, Any] = Depends(get_current_user)):
     user_id = user["id"]
     service_data = await get_cached_service("iptv")
-    if not service_data:
-        raise HTTPException(status_code=500, detail="Configuration IPTV non disponible")
+    if not service_data or not service_data.get("is_active"):
+        raise HTTPException(status_code=403, detail="Le service IPTV est temporairement indisponible.")
 
     prices = service_data.get("prices") or {}
     config = service_data.get("config") or {}
