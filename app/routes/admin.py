@@ -711,6 +711,7 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
             panel_accounts = []
 
         active_b = pay_data.get("activeBank", "bank2")
+        active_sumup = "sumup_bank2" if active_b in ("bank2", "sumup_bank2") else "sumup"
         banks_list = []
         if isinstance(pay_data.get("banks_list"), list) and pay_data["banks_list"]:
             banks_list = pay_data["banks_list"]
@@ -747,7 +748,7 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
             "panel_accounts": panel_accounts
         },
         "sumup": {
-            "active": active_b,
+            "active": active_sumup,
             "expiration_minutes": str(pay_data.get("expirationMinutes", 15)),
             "banks_list": banks_list,
             "banks": {
