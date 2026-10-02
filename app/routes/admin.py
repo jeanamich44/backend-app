@@ -118,12 +118,22 @@ class GeneralSettingsPayload(BaseModel):
     telegramBotToken: Optional[str] = None
     botName: Optional[str] = None
     supportTelegram: Optional[str] = None
+    channelTelegram: Optional[str] = None
+    backendUrl: Optional[str] = None
+    siteName: Optional[str] = None
     maintenanceMode: Optional[bool] = None
 
 class SecuritySettingsPayload(BaseModel):
     internalApiSecret: Optional[str] = None
     apiSecretKey: Optional[str] = None
     adminSlug: Optional[str] = None
+    jwtExpirationMinutes: Optional[int] = None
+
+class PaymentsLimitsPayload(BaseModel):
+    paymentEnabled: Optional[bool] = None
+    minPaymentAmount: Optional[float] = None
+    maxPaymentAmount: Optional[float] = None
+    maxPendingPaymentsPerClient: Optional[int] = None
 
 class AmendeDecisionPayload(BaseModel):
     action: str
@@ -772,7 +782,18 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
         "adminSlug": sec_data.get("adminSlug") or "",
         "frontendUrl": gen_data.get("frontendUrl", ""),
         "telegramBotToken": gen_data.get("telegramBotToken", ""),
-        "apiSecretKey": sec_data.get("apiSecretKey", "")
+        "botName": gen_data.get("botName", ""),
+        "supportTelegram": gen_data.get("supportTelegram", ""),
+        "channelTelegram": gen_data.get("channelTelegram", ""),
+        "backendUrl": gen_data.get("backendUrl", ""),
+        "siteName": gen_data.get("siteName", ""),
+        "maintenanceMode": bool(gen_data.get("maintenanceMode", False)),
+        "apiSecretKey": sec_data.get("apiSecretKey") or sec_data.get("internalApiSecret") or "",
+        "jwtExpirationMinutes": sec_data.get("jwtExpirationMinutes", 30),
+        "paymentEnabled": bool(pay_data.get("paymentEnabled", True)),
+        "minPaymentAmount": pay_data.get("minPaymentAmount", 1.0),
+        "maxPaymentAmount": pay_data.get("maxPaymentAmount", 500.0),
+        "maxPendingPaymentsPerClient": pay_data.get("maxPendingPaymentsPerClient", 2)
     }
 
 # =====================================================================
@@ -1103,13 +1124,25 @@ async def admin_save_general(payload: GeneralSettingsPayload, admin: Any = Depen
                 raw_g = json.loads(raw_g)
             gen_data = raw_g if isinstance(raw_g, dict) else {}
         if payload.frontendUrl is not None:
-            gen_data["frontendUrl"] = payload.frontendUrl.strip()
+            val = payload.frontendUrl.strip()
+            if not val:
+                raise HTTPException(status_code=400, detail="L'URL frontend ne peut pas être vide")
+            gen_data["frontendUrl"] = val
         if payload.telegramBotToken is not None:
-            gen_data["telegramBotToken"] = payload.telegramBotToken.strip()
+            val = payload.telegramBotToken.strip()
+            if not val:
+                raise HTTPException(status_code=400, detail="Le token bot Telegram ne peut pas être vide")
+            gen_data["telegramBotToken"] = val
         if payload.botName is not None:
             gen_data["botName"] = payload.botName.strip()
         if payload.supportTelegram is not None:
             gen_data["supportTelegram"] = payload.supportTelegram.strip()
+        if payload.channelTelegram is not None:
+            gen_data["channelTelegram"] = payload.channelTelegram.strip()
+        if payload.backendUrl is not None:
+            gen_data["backendUrl"] = payload.backendUrl.strip()
+        if payload.siteName is not None:
+            gen_data["siteName"] = payload.siteName.strip()
         if payload.maintenanceMode is not None:
             gen_data["maintenanceMode"] = payload.maintenanceMode
         await conn.execute("UPDATE settings SET general = $1 WHERE id = 'global'", json.dumps(gen_data))
@@ -1134,13 +1167,45 @@ async def admin_save_security(payload: SecuritySettingsPayload, admin: Any = Dep
             sec_data = raw_s if isinstance(raw_s, dict) else {}
         sec_key = payload.apiSecretKey or payload.internalApiSecret
         if sec_key is not None:
-            sec_data["apiSecretKey"] = sec_key.strip()
+            val = sec_key.strip()
+            if not val:
+                raise HTTPException(status_code=400, detail="La clé secrète API ne peut pas être vide")
+            sec_data["apiSecretKey"] = val
             sec_data.pop("internalApiSecret", None)
         if payload.adminSlug is not None:
             sec_data["adminSlug"] = payload.adminSlug.strip()
+        if payload.jwtExpirationMinutes is not None:
+            sec_data["jwtExpirationMinutes"] = int(payload.jwtExpirationMinutes)
         await conn.execute("UPDATE settings SET security = $1 WHERE id = 'global'", json.dumps(sec_data))
         invalidate_settings()
         await settings.load_from_db(conn)
+    return {"success": True}
+
+# =====================================================================
+
+@router.post("/settings/payments-limits")
+async def admin_save_payments_limits(payload: PaymentsLimitsPayload, admin: Any = Depends(get_current_admin)):
+    if isinstance(admin, Response):
+        return admin
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        s_row = await conn.fetchrow("SELECT payments FROM settings WHERE id = 'global'")
+        pay_data = {}
+        if s_row and s_row["payments"]:
+            raw_p = s_row["payments"]
+            while isinstance(raw_p, str):
+                raw_p = json.loads(raw_p)
+            pay_data = raw_p if isinstance(raw_p, dict) else {}
+        if payload.paymentEnabled is not None:
+            pay_data["paymentEnabled"] = payload.paymentEnabled
+        if payload.minPaymentAmount is not None:
+            pay_data["minPaymentAmount"] = float(payload.minPaymentAmount)
+        if payload.maxPaymentAmount is not None:
+            pay_data["maxPaymentAmount"] = float(payload.maxPaymentAmount)
+        if payload.maxPendingPaymentsPerClient is not None:
+            pay_data["maxPendingPaymentsPerClient"] = int(payload.maxPendingPaymentsPerClient)
+        await conn.execute("UPDATE settings SET payments = $1 WHERE id = 'global'", json.dumps(pay_data))
+        invalidate_settings()
     return {"success": True}
 
 # =====================================================================
