@@ -16,6 +16,8 @@ async def get_me(user: Dict[str, Any] = Depends(get_current_user)):
     admin_slug: Optional[str] = None
     support_telegram: Optional[str] = None
     channel_telegram: Optional[str] = None
+    marquee_text: Optional[str] = None
+    marquee_style: str = "standard"
 
     s_data = await get_cached_settings()
     if s_data:
@@ -23,6 +25,8 @@ async def get_me(user: Dict[str, Any] = Depends(get_current_user)):
         sec_data = s_data.get("security") or {}
         support_telegram = gen_data.get("supportTelegram") or None
         channel_telegram = gen_data.get("channelTelegram") or None
+        marquee_text = (gen_data.get("marqueeText") or "").strip() or None
+        marquee_style = (gen_data.get("marqueeStyle") or "standard").strip()
         if user.get("admin") is True:
             admin_slug = sec_data.get("adminSlug") or None
 
@@ -61,6 +65,8 @@ async def get_me(user: Dict[str, Any] = Depends(get_current_user)):
         "admin_slug": admin_slug,
         "support_telegram": support_telegram,
         "channel_telegram": channel_telegram,
+        "marquee_text": marquee_text,
+        "marquee_style": marquee_style,
         "services": services_status,
         "generateDocs": generate_docs_config
     }

@@ -120,7 +120,6 @@ class GeneralSettingsPayload(BaseModel):
     supportTelegram: Optional[str] = None
     channelTelegram: Optional[str] = None
     backendUrl: Optional[str] = None
-    siteName: Optional[str] = None
     marqueeText: Optional[str] = None
     marqueeStyle: Optional[str] = None
     maintenanceMode: Optional[bool] = None
@@ -130,9 +129,6 @@ class SecuritySettingsPayload(BaseModel):
     apiSecretKey: Optional[str] = None
     adminSlug: Optional[str] = None
     jwtExpirationMinutes: Optional[int] = None
-    antiDebugMode: Optional[bool] = None
-    turnstileSiteKey: Optional[str] = None
-    turnstileSecretKey: Optional[str] = None
 
 class PaymentsLimitsPayload(BaseModel):
     paymentEnabled: Optional[bool] = None
@@ -866,15 +862,11 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
         "supportTelegram": gen_data.get("supportTelegram", ""),
         "channelTelegram": gen_data.get("channelTelegram", ""),
         "backendUrl": gen_data.get("backendUrl", ""),
-        "siteName": gen_data.get("siteName", ""),
         "marqueeText": gen_data.get("marqueeText", ""),
         "marqueeStyle": gen_data.get("marqueeStyle", "standard"),
         "maintenanceMode": bool(gen_data.get("maintenanceMode", False)),
         "apiSecretKey": sec_data.get("apiSecretKey") or sec_data.get("internalApiSecret") or "",
         "jwtExpirationMinutes": int(sec_data.get("jwtExpirationMinutes") or 1440),
-        "antiDebugMode": bool(sec_data.get("antiDebugMode", True)),
-        "turnstileSiteKey": sec_data.get("turnstileSiteKey", ""),
-        "turnstileSecretKey": sec_data.get("turnstileSecretKey", ""),
         "paymentEnabled": bool(pay_data.get("paymentEnabled", True)),
         "minPaymentAmount": pay_data.get("minPaymentAmount", 1.0),
         "maxPaymentAmount": pay_data.get("maxPaymentAmount", 500.0),
@@ -1228,8 +1220,6 @@ async def admin_save_general(payload: GeneralSettingsPayload, admin: Any = Depen
             gen_data["channelTelegram"] = payload.channelTelegram.strip()
         if payload.backendUrl is not None:
             gen_data["backendUrl"] = payload.backendUrl.strip()
-        if payload.siteName is not None:
-            gen_data["siteName"] = payload.siteName.strip()
         if payload.marqueeText is not None:
             gen_data["marqueeText"] = payload.marqueeText.strip()
         if payload.marqueeStyle is not None:
@@ -1267,12 +1257,6 @@ async def admin_save_security(payload: SecuritySettingsPayload, admin: Any = Dep
             sec_data["adminSlug"] = payload.adminSlug.strip()
         if payload.jwtExpirationMinutes is not None:
             sec_data["jwtExpirationMinutes"] = int(payload.jwtExpirationMinutes)
-        if payload.antiDebugMode is not None:
-            sec_data["antiDebugMode"] = bool(payload.antiDebugMode)
-        if payload.turnstileSiteKey is not None:
-            sec_data["turnstileSiteKey"] = payload.turnstileSiteKey.strip()
-        if payload.turnstileSecretKey is not None:
-            sec_data["turnstileSecretKey"] = payload.turnstileSecretKey.strip()
         await conn.execute("UPDATE settings SET security = $1 WHERE id = 'global'", json.dumps(sec_data))
         invalidate_settings()
         await settings.load_from_db(conn)
