@@ -10,7 +10,7 @@ from uuid import UUID
 from decimal import Decimal
 from datetime import datetime, timedelta, timezone, date
 from typing import Dict, Any, Optional, List
-from fastapi import APIRouter, Depends, Header, Response, Request
+from fastapi import APIRouter, Depends, Header, Response, Request, Query, HTTPException
 from pydantic import BaseModel
 from app.auth import validate_telegram_init_data
 from app.config import settings
@@ -121,6 +121,8 @@ class GeneralSettingsPayload(BaseModel):
     channelTelegram: Optional[str] = None
     backendUrl: Optional[str] = None
     siteName: Optional[str] = None
+    marqueeText: Optional[str] = None
+    marqueeStyle: Optional[str] = None
     maintenanceMode: Optional[bool] = None
 
 class SecuritySettingsPayload(BaseModel):
@@ -128,12 +130,28 @@ class SecuritySettingsPayload(BaseModel):
     apiSecretKey: Optional[str] = None
     adminSlug: Optional[str] = None
     jwtExpirationMinutes: Optional[int] = None
+    antiDebugMode: Optional[bool] = None
+    turnstileSiteKey: Optional[str] = None
+    turnstileSecretKey: Optional[str] = None
 
 class PaymentsLimitsPayload(BaseModel):
     paymentEnabled: Optional[bool] = None
     minPaymentAmount: Optional[float] = None
     maxPaymentAmount: Optional[float] = None
     maxPendingPaymentsPerClient: Optional[int] = None
+
+class GenerateDocsSettingsPayload(BaseModel):
+    isActive: Optional[bool] = None
+    flattenPdf: Optional[bool] = None
+    previewOff: Optional[bool] = None
+    previewCooldownEnabled: Optional[bool] = None
+    previewCooldownSeconds: Optional[int] = None
+    subcategories: Optional[Dict[str, Any]] = None
+    prices: Optional[Dict[str, Any]] = None
+
+class ServiceTogglePayload(BaseModel):
+    slug: str
+    isActive: bool
 
 class AmendeDecisionPayload(BaseModel):
     action: str
@@ -151,7 +169,7 @@ def _generate_admin_token() -> str:
     sig = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
     return f"{payload}:{sig}"
 
-def _is_valid_session(token: str) -> bool:
+def _is_valid_session(token: str, max_age_seconds: int = 86400) -> bool:
     if not token:
         return False
     parts = token.split(":")
@@ -159,7 +177,7 @@ def _is_valid_session(token: str) -> bool:
         ts_str, rand, sig = parts
         try:
             ts = int(ts_str)
-            if time.time() - ts > 86400:
+            if time.time() - ts > max_age_seconds:
                 return False
             secret = (ADMIN_PASSWORD + settings.internal_api_secret).encode("utf-8")
             expected_sig = hmac.new(secret, f"{ts}:{rand}".encode("utf-8"), hashlib.sha256).hexdigest()
@@ -217,7 +235,16 @@ async def get_current_admin(
 
     if authorization and authorization.startswith("Bearer "):
         token = authorization[7:].strip()
-        if _is_valid_session(token):
+        max_age = 86400
+        try:
+            s_data = await get_cached_settings()
+            if s_data and s_data.get("security"):
+                raw_min = s_data["security"].get("jwtExpirationMinutes")
+                if raw_min:
+                    max_age = int(raw_min) * 60
+        except Exception:
+            pass
+        if _is_valid_session(token, max_age_seconds=max_age):
             return {
                 "type": "web",
                 "token": token
@@ -243,11 +270,35 @@ async def admin_login(payload: AdminLoginRequest):
         return Response(status_code=444)
 
     token = _generate_admin_token()
+    exp_seconds = 86400
+    try:
+        s_data = await get_cached_settings()
+        if s_data and s_data.get("security"):
+            raw_min = s_data["security"].get("jwtExpirationMinutes")
+            if raw_min:
+                exp_seconds = int(raw_min) * 60
+    except Exception:
+        pass
     return {
         "success": True,
         "token": token,
-        "expires_in": 86400
+        "expires_in": exp_seconds
     }
+
+# =====================================================================
+
+@router.get("/verify-slug")
+async def verify_admin_slug(
+    slug: str = Query(...),
+    x_internal_secret: Optional[str] = Header(None, alias="X-Internal-Secret")
+):
+    s_data = await get_cached_settings()
+    sec_data = s_data.get("security") if s_data else {}
+    db_slug = (sec_data.get("adminSlug") or "espace-sec-x9k2m7").strip().strip("/")
+    clean_slug = slug.strip().strip("/")
+    if secrets.compare_digest(clean_slug, db_slug):
+        return {"valid": True, "slug": db_slug}
+    raise HTTPException(status_code=404, detail="Slug invalide")
 
 # =====================================================================
 
@@ -743,6 +794,35 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
         b1 = pay_data.get("bank1", {})
         b2 = pay_data.get("bank2", {})
 
+        services_rows = await conn.fetch("SELECT slug, name, is_active, prices, config FROM services")
+        services_dict = {}
+        for s_r in services_rows:
+            s_slug = s_r["slug"]
+            s_cfg = s_r["config"]
+            while isinstance(s_cfg, str):
+                s_cfg = json.loads(s_cfg)
+            s_pr = s_r["prices"]
+            while isinstance(s_pr, str):
+                s_pr = json.loads(s_pr)
+            services_dict[s_slug] = {
+                "name": s_r["name"],
+                "isActive": bool(s_r["is_active"]),
+                "config": s_cfg if isinstance(s_cfg, dict) else {},
+                "prices": s_pr if isinstance(s_pr, dict) else {}
+            }
+
+        gd = services_dict.get("generate-docs", {})
+        gd_cfg = gd.get("config", {})
+        generate_docs_data = {
+            "isActive": gd.get("isActive", True),
+            "flattenPdf": bool(gd_cfg.get("flattenPdf", True)),
+            "previewOff": bool(gd_cfg.get("previewOff", False)),
+            "previewCooldownEnabled": bool(gd_cfg.get("previewCooldownEnabled", True)),
+            "previewCooldownSeconds": int(gd_cfg.get("previewCooldownSeconds", 30)),
+            "subcategories": gd_cfg.get("subcategories", {}),
+            "prices": gd.get("prices", {})
+        }
+
     return {
         "iptv": {
             "host": iptv_config.get("host") or "",
@@ -779,7 +859,7 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
             }
         },
         "oxapayApiKey": pay_data.get("oxapayApiKey") or "",
-        "adminSlug": sec_data.get("adminSlug") or "",
+        "adminSlug": sec_data.get("adminSlug") or "espace-sec-x9k2m7",
         "frontendUrl": gen_data.get("frontendUrl", ""),
         "telegramBotToken": gen_data.get("telegramBotToken", ""),
         "botName": gen_data.get("botName", ""),
@@ -787,13 +867,20 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
         "channelTelegram": gen_data.get("channelTelegram", ""),
         "backendUrl": gen_data.get("backendUrl", ""),
         "siteName": gen_data.get("siteName", ""),
+        "marqueeText": gen_data.get("marqueeText", ""),
+        "marqueeStyle": gen_data.get("marqueeStyle", "standard"),
         "maintenanceMode": bool(gen_data.get("maintenanceMode", False)),
         "apiSecretKey": sec_data.get("apiSecretKey") or sec_data.get("internalApiSecret") or "",
-        "jwtExpirationMinutes": sec_data.get("jwtExpirationMinutes", 30),
+        "jwtExpirationMinutes": int(sec_data.get("jwtExpirationMinutes") or 1440),
+        "antiDebugMode": bool(sec_data.get("antiDebugMode", True)),
+        "turnstileSiteKey": sec_data.get("turnstileSiteKey", ""),
+        "turnstileSecretKey": sec_data.get("turnstileSecretKey", ""),
         "paymentEnabled": bool(pay_data.get("paymentEnabled", True)),
         "minPaymentAmount": pay_data.get("minPaymentAmount", 1.0),
         "maxPaymentAmount": pay_data.get("maxPaymentAmount", 500.0),
-        "maxPendingPaymentsPerClient": pay_data.get("maxPendingPaymentsPerClient", 2)
+        "maxPendingPaymentsPerClient": pay_data.get("maxPendingPaymentsPerClient", 2),
+        "generateDocs": generate_docs_data,
+        "services": services_dict
     }
 
 # =====================================================================
@@ -1143,6 +1230,10 @@ async def admin_save_general(payload: GeneralSettingsPayload, admin: Any = Depen
             gen_data["backendUrl"] = payload.backendUrl.strip()
         if payload.siteName is not None:
             gen_data["siteName"] = payload.siteName.strip()
+        if payload.marqueeText is not None:
+            gen_data["marqueeText"] = payload.marqueeText.strip()
+        if payload.marqueeStyle is not None:
+            gen_data["marqueeStyle"] = payload.marqueeStyle.strip()
         if payload.maintenanceMode is not None:
             gen_data["maintenanceMode"] = payload.maintenanceMode
         await conn.execute("UPDATE settings SET general = $1 WHERE id = 'global'", json.dumps(gen_data))
@@ -1176,6 +1267,12 @@ async def admin_save_security(payload: SecuritySettingsPayload, admin: Any = Dep
             sec_data["adminSlug"] = payload.adminSlug.strip()
         if payload.jwtExpirationMinutes is not None:
             sec_data["jwtExpirationMinutes"] = int(payload.jwtExpirationMinutes)
+        if payload.antiDebugMode is not None:
+            sec_data["antiDebugMode"] = bool(payload.antiDebugMode)
+        if payload.turnstileSiteKey is not None:
+            sec_data["turnstileSiteKey"] = payload.turnstileSiteKey.strip()
+        if payload.turnstileSecretKey is not None:
+            sec_data["turnstileSecretKey"] = payload.turnstileSecretKey.strip()
         await conn.execute("UPDATE settings SET security = $1 WHERE id = 'global'", json.dumps(sec_data))
         invalidate_settings()
         await settings.load_from_db(conn)
@@ -1206,6 +1303,90 @@ async def admin_save_payments_limits(payload: PaymentsLimitsPayload, admin: Any 
             pay_data["maxPendingPaymentsPerClient"] = int(payload.maxPendingPaymentsPerClient)
         await conn.execute("UPDATE settings SET payments = $1 WHERE id = 'global'", json.dumps(pay_data))
         invalidate_settings()
+    return {"success": True}
+
+# =====================================================================
+
+@router.post("/settings/services/toggle")
+async def admin_toggle_service(payload: ServiceTogglePayload, admin: Any = Depends(get_current_admin)):
+    if isinstance(admin, Response):
+        return admin
+    clean_slug = re.sub(r'[^a-zA-Z0-9_\-]', '', payload.slug)
+    if not clean_slug:
+        return Response(status_code=400, content='{"error": "Slug invalide"}', media_type="application/json")
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE services SET is_active = $1 WHERE slug = $2", payload.isActive, clean_slug)
+    invalidate_service(clean_slug)
+    return {"success": True, "slug": clean_slug, "isActive": payload.isActive}
+
+# =====================================================================
+
+@router.post("/settings/generate-docs")
+async def admin_save_generate_docs(payload: GenerateDocsSettingsPayload, admin: Any = Depends(get_current_admin)):
+    if isinstance(admin, Response):
+        return admin
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT is_active, config, prices FROM services WHERE slug = 'generate-docs'")
+        if not row:
+            return Response(status_code=404, content='{"error": "Service generate-docs introuvable"}', media_type="application/json")
+        
+        cfg = row["config"]
+        while isinstance(cfg, str):
+            cfg = json.loads(cfg)
+        cfg_data = cfg if isinstance(cfg, dict) else {}
+
+        pr = row["prices"]
+        while isinstance(pr, str):
+            pr = json.loads(pr)
+        pr_data = pr if isinstance(pr, dict) else {}
+
+        is_active = row["is_active"]
+        if payload.isActive is not None:
+            is_active = payload.isActive
+
+        if payload.flattenPdf is not None:
+            cfg_data["flattenPdf"] = bool(payload.flattenPdf)
+        if payload.previewOff is not None:
+            cfg_data["previewOff"] = bool(payload.previewOff)
+        if payload.previewCooldownEnabled is not None:
+            cfg_data["previewCooldownEnabled"] = bool(payload.previewCooldownEnabled)
+        if payload.previewCooldownSeconds is not None:
+            cfg_data["previewCooldownSeconds"] = max(0, int(payload.previewCooldownSeconds))
+
+        if payload.subcategories is not None:
+            if "subcategories" not in cfg_data or not isinstance(cfg_data["subcategories"], dict):
+                cfg_data["subcategories"] = {}
+            for sub_key, sub_val in payload.subcategories.items():
+                if isinstance(sub_val, dict):
+                    if sub_key not in cfg_data["subcategories"] or not isinstance(cfg_data["subcategories"][sub_key], dict):
+                        cfg_data["subcategories"][sub_key] = {}
+                    if "enabled" in sub_val:
+                        cfg_data["subcategories"][sub_key]["enabled"] = bool(sub_val["enabled"])
+                    cfg_data["subcategories"][sub_key].pop("allowed_roles", None)
+                    cfg_data["subcategories"][sub_key].pop("allowedRoles", None)
+                    if "documents" in sub_val and isinstance(sub_val["documents"], dict):
+                        if "documents" not in cfg_data["subcategories"][sub_key] or not isinstance(cfg_data["subcategories"][sub_key]["documents"], dict):
+                            cfg_data["subcategories"][sub_key]["documents"] = {}
+                        for doc_k, doc_v in sub_val["documents"].items():
+                            if isinstance(doc_v, dict):
+                                cfg_data["subcategories"][sub_key]["documents"][doc_k] = {
+                                    "enabled": bool(doc_v.get("enabled", True))
+                                }
+
+        if payload.prices is not None and isinstance(payload.prices, dict):
+            for p_k, p_v in payload.prices.items():
+                try:
+                    pr_data[p_k] = float(p_v)
+                except Exception:
+                    pass
+
+        await conn.execute(
+            "UPDATE services SET is_active = $1, config = $2, prices = $3 WHERE slug = 'generate-docs'",
+            is_active, json.dumps(cfg_data), json.dumps(pr_data)
+        )
+    invalidate_service("generate-docs")
     return {"success": True}
 
 # =====================================================================

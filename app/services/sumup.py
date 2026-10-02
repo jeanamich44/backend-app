@@ -18,7 +18,7 @@ _token_cache: Dict[str, Tuple[str, float]] = {}
 
 # =====================================================================
 
-async def get_payment_settings(requested_bank: Optional[str] = None) -> Tuple[Dict[str, str], int, str]:
+async def get_payment_settings(requested_bank: Optional[str] = None) -> Tuple[Dict[str, str], int, str, Dict[str, Any]]:
     settings_data = await get_cached_settings()
     if not settings_data or not settings_data.get("payments"):
         raise HTTPException(status_code=500, detail="Table settings colonne payments absente")
@@ -37,6 +37,13 @@ async def get_payment_settings(requested_bank: Optional[str] = None) -> Tuple[Di
             exp_minutes = 15
     except (TypeError, ValueError):
         exp_minutes = 15
+
+    limits = {
+        "payment_enabled": bool(pay_data.get("paymentEnabled", True)),
+        "min_amount": float(pay_data.get("minPaymentAmount") or 1.0),
+        "max_amount": float(pay_data.get("maxPaymentAmount") or 500.0),
+        "max_pending": int(pay_data.get("maxPendingPaymentsPerClient") or 1)
+    }
 
     bank_obj = pay_data.get(bank_name)
     if not isinstance(bank_obj, dict):
@@ -64,12 +71,12 @@ async def get_payment_settings(requested_bank: Optional[str] = None) -> Tuple[Di
         "client_secret": str(client_secret).strip(),
         "api_key": str(api_key).strip() if api_key else "",
     }
-    return config, exp_minutes, bank_name
+    return config, exp_minutes, bank_name, limits
 
 # =====================================================================
 
 async def get_bank_config(bank_name: str) -> Dict[str, str]:
-    config, _, _ = await get_payment_settings(bank_name)
+    config, _, _, _ = await get_payment_settings(bank_name)
     return config
 
 # =====================================================================
@@ -108,10 +115,18 @@ async def create_checkout(
     amount: float,
     bank_name: Optional[str] = None
 ) -> Dict[str, Any]:
-    if amount < 1.0 or amount > 60.0:
-        raise HTTPException(status_code=400, detail="Montant invalide (limite 1€ à 60€)")
+    config, exp_minutes, selected_bank, limits = await get_payment_settings(bank_name)
 
-    config, exp_minutes, selected_bank = await get_payment_settings(bank_name)
+    if not limits["payment_enabled"]:
+        raise HTTPException(status_code=403, detail="Les recharges sont actuellement désactivées.")
+
+    min_amt = limits["min_amount"]
+    max_amt = limits["max_amount"]
+    if amount < min_amt or amount > max_amt:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Montant invalide (limite autorisée: {min_amt:g}€ à {max_amt:g}€)"
+        )
 
     pool = await get_db_pool()
     async with pool.acquire() as conn:
@@ -125,19 +140,23 @@ async def create_checkout(
             exp_minutes
         )
 
-        pending = await conn.fetchrow(
-            "SELECT checkout_id FROM payments WHERE user_id = $1 AND status = 'PENDING' ORDER BY created_at DESC LIMIT 1",
+        pending_rows = await conn.fetch(
+            "SELECT checkout_id FROM payments WHERE user_id = $1 AND status = 'PENDING' ORDER BY created_at DESC",
             user_id
         )
 
-    if pending:
-        check_res = await verify_checkout(pending["checkout_id"], user_id=user_id)
+    max_p = limits["max_pending"]
+    active_pending_count = 0
+    for p_row in pending_rows:
+        check_res = await verify_checkout(p_row["checkout_id"], user_id=user_id)
         if check_res.get("status") == "PENDING":
-            print(f"[RENDER SUMUP BLOCAGE] Refus création: user {user_id} possède déjà une facture PENDING active ({pending['checkout_id']})", flush=True)
-            raise HTTPException(
-                status_code=409,
-                detail="Vous avez déjà un paiement en attente. Veuillez finaliser votre règlement ou annuler la facture en cours."
-            )
+            active_pending_count += 1
+            if active_pending_count >= max_p:
+                print(f"[RENDER SUMUP BLOCAGE] Refus création: user {user_id} a atteint la limite de factures PENDING ({active_pending_count}/{max_p})", flush=True)
+                raise HTTPException(
+                    status_code=409,
+                    detail="Vous avez atteint la limite de paiements en attente. Veuillez finaliser votre règlement ou annuler la facture en cours."
+                )
 
     async with pool.acquire() as conn:
         daily_count = await conn.fetchval(
@@ -390,7 +409,7 @@ async def verify_checkout(
 # =====================================================================
 
 async def get_pending_checkout(user_id: int) -> Optional[Dict[str, Any]]:
-    _, exp_minutes, _ = await get_payment_settings()
+    _, exp_minutes, _, _ = await get_payment_settings()
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         await conn.execute(

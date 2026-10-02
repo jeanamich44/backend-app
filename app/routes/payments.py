@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/payments", tags=["payments"])
 # =====================================================================
 
 class CreatePaymentRequest(BaseModel):
-    amount: float = Field(..., ge=1.0, le=60.0)
+    amount: float = Field(..., gt=0)
     bank: Optional[str] = None
 
 # =====================================================================
