@@ -1160,7 +1160,7 @@ async def telegram_webhook(
                     json.dumps({"username": username, "first_name": first_name, "chat_id": chat_id})
                 )
                 safe_name = _escape_html(first_name or "Cher client")
-                safe_bot = _escape_html(settings.bot_name or "ChezRheyy")
+                safe_bot = _escape_html(settings.bot_name or "Chez Rheyy")
                 welcome_text = (
                     f"👋 Bonjour <b>{safe_name}</b> !\n\n"
                     f"Bienvenue sur <b>{safe_bot}</b>.\n"
@@ -1193,7 +1193,7 @@ async def telegram_webhook(
                 json.dumps({"username": username, "first_name": first_name, "chat_id": chat_id})
             )
             safe_name = _escape_html(first_name or "Admin")
-            safe_bot = _escape_html(settings.bot_name or "ChezRheyy")
+            safe_bot = _escape_html(settings.bot_name or "Chez Rheyy")
             welcome_text = (
                 f"👋 Bonjour <b>{safe_name}</b> (Mode Administrateur) !\n\n"
                 f"Bienvenue sur <b>{safe_bot}</b>.\n"

@@ -861,7 +861,7 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
         "botName": gen_data.get("botName", ""),
         "supportTelegram": gen_data.get("supportTelegram", ""),
         "channelTelegram": gen_data.get("channelTelegram", ""),
-        "backendUrl": gen_data.get("backendUrl", ""),
+        "backendUrl": gen_data.get("backendUrl") or os.getenv("RENDER_EXTERNAL_URL") or os.getenv("BACKEND_URL") or "",
         "marqueeText": gen_data.get("marqueeText", ""),
         "marqueeStyle": gen_data.get("marqueeStyle", "standard"),
         "maintenanceMode": bool(gen_data.get("maintenanceMode", False)),
