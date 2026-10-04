@@ -195,7 +195,7 @@ async def get_my_carrefour_cards(user: Dict[str, Any] = Depends(get_current_user
         rows = await conn.fetch("""
             SELECT id, code, pin, value, price, created_at
             FROM transactions
-            WHERE user_id = $1 AND brand = 'carr'
+            WHERE user_id = $1 AND LOWER(brand) = 'carr'
             ORDER BY created_at DESC
             LIMIT 50
         """, user["id"])
@@ -528,7 +528,7 @@ async def get_my_iptv_subscriptions(user: Dict[str, Any] = Depends(get_current_u
         rows = await conn.fetch("""
             SELECT id, code as username, pin as password, value as months, price, notes as url, created_at
             FROM transactions
-            WHERE user_id = $1 AND brand = 'iptv'
+            WHERE user_id = $1 AND LOWER(brand) = 'iptv'
             ORDER BY created_at DESC
             LIMIT 50
         """, user["id"])

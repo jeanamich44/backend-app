@@ -335,13 +335,12 @@ async def _handle_stat(chat_id: int, conn: Any) -> None:
 # =====================================================================
 
 async def _handle_commandes(chat_id: int, args: List[str], conn: Any) -> None:
-    days = 7
+    days = 365
     search_arg: Optional[str] = None
     show_all = False
 
     if len(args) == 0:
         show_all = True
-        days = 1
     elif len(args) == 1:
         search_arg = args[0].strip()
     else:
@@ -354,11 +353,10 @@ async def _handle_commandes(chat_id: int, args: List[str], conn: Any) -> None:
             pass
 
     if show_all:
-        search_title = "Global (Tous clients - 24h Max)"
+        search_title = "Global (Derniers achats)"
         rows = await conn.fetch("""
             SELECT brand, code, pin, value, price, created_at, user_id
             FROM transactions
-            WHERE created_at >= NOW() - INTERVAL '1 day'
             ORDER BY created_at DESC
             LIMIT 100
         """)

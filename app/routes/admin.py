@@ -66,11 +66,6 @@ class UserBanPayload(BaseModel):
     banned: Optional[bool] = None
     ban: Optional[bool] = None
     reason: Optional[str] = ""
-
-class UserAdminPayload(BaseModel):
-    userId: Any
-    admin: bool
-
 class UserDeletePayload(BaseModel):
     userId: Any
 
@@ -118,6 +113,7 @@ class GeneralSettingsPayload(BaseModel):
     telegramBotToken: Optional[str] = None
     botName: Optional[str] = None
     supportTelegram: Optional[str] = None
+    supportTelegram2: Optional[str] = None
     channelTelegram: Optional[str] = None
     backendUrl: Optional[str] = None
     marqueeText: Optional[str] = None
@@ -521,14 +517,13 @@ async def admin_get_users(admin: Any = Depends(get_current_admin)):
         async with pool.acquire() as conn:
             rows = await conn.fetch("""
                 SELECT u.id, u.username, u.first_name, u.balance, u.is_banned, u.admin, u.created_at,
-                       COALESCE(p.achats, 0) as achats
+                       COALESCE(t.achats, 0) as achats
                 FROM users u
                 LEFT JOIN (
                     SELECT user_id, COUNT(*) as achats
-                    FROM payments
-                    WHERE status = 'PAID'
+                    FROM transactions
                     GROUP BY user_id
-                ) p ON p.user_id = u.id
+                ) t ON t.user_id = u.id
                 ORDER BY u.created_at DESC
             """)
             users = [
@@ -589,23 +584,6 @@ async def admin_toggle_ban(payload: UserBanPayload, admin: Any = Depends(get_cur
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE users SET is_banned = $1, updated_at = NOW() WHERE id = $2", is_banned, uid)
-    invalidate_active_admins()
-    return {"success": True}
-
-# =====================================================================
-
-@router.post("/users/admin")
-async def admin_toggle_admin(payload: UserAdminPayload, admin: Any = Depends(get_current_admin)):
-    if isinstance(admin, Response):
-        return admin
-    try:
-        uid = int(str(payload.userId).strip())
-    except Exception:
-        return Response(status_code=400)
-
-    pool = await get_db_pool()
-    async with pool.acquire() as conn:
-        await conn.execute("UPDATE users SET admin = $1, updated_at = NOW() WHERE id = $2", payload.admin, uid)
     invalidate_active_admins()
     return {"success": True}
 
@@ -687,7 +665,7 @@ async def admin_get_transactions(admin: Any = Depends(get_current_admin)):
             """)
             txs = [
                 {
-                    "id": str(row["id"]),
+                    "id": int(row["id"]) if isinstance(row["id"], (int, float)) or (isinstance(row["id"], str) and row["id"].isdigit()) else row["id"],
                     "userId": str(row["user_id"]),
                     "brand": row["brand"] or "",
                     "code": row["code"] or "",
@@ -860,6 +838,7 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
         "telegramBotToken": gen_data.get("telegramBotToken", ""),
         "botName": gen_data.get("botName", ""),
         "supportTelegram": gen_data.get("supportTelegram", ""),
+        "supportTelegram2": gen_data.get("supportTelegram2", ""),
         "channelTelegram": gen_data.get("channelTelegram", ""),
         "backendUrl": gen_data.get("backendUrl") or os.getenv("RENDER_EXTERNAL_URL") or os.getenv("BACKEND_URL") or "",
         "marqueeText": gen_data.get("marqueeText", ""),
@@ -1216,6 +1195,8 @@ async def admin_save_general(payload: GeneralSettingsPayload, admin: Any = Depen
             gen_data["botName"] = payload.botName.strip()
         if payload.supportTelegram is not None:
             gen_data["supportTelegram"] = payload.supportTelegram.strip()
+        if payload.supportTelegram2 is not None:
+            gen_data["supportTelegram2"] = payload.supportTelegram2.strip()
         if payload.channelTelegram is not None:
             gen_data["channelTelegram"] = payload.channelTelegram.strip()
         if payload.backendUrl is not None:

@@ -34,6 +34,7 @@ class Settings:
         self.internal_api_secret: str = ""
         self.bot_name: str = ""
         self.support_telegram: str = ""
+        self.support_telegram2: str = ""
         self.channel_telegram: str = ""
         self.backend_url: str = ""
 
@@ -80,6 +81,7 @@ class Settings:
             self.internal_api_secret = str(api_sec).strip()
             self.bot_name = str(general.get("botName") or "").strip()
             self.support_telegram = str(general.get("supportTelegram") or "").strip()
+            self.support_telegram2 = str(general.get("supportTelegram2") or "").strip()
             self.channel_telegram = str(general.get("channelTelegram") or "").strip()
             self.backend_url = str(general.get("backendUrl") or "").strip()
             logger.info("Configuration dynamique chargée avec succès depuis la BDD.")

@@ -15,6 +15,7 @@ router = APIRouter(prefix="/api", tags=["user"])
 async def get_me(user: Dict[str, Any] = Depends(get_current_user)):
     admin_slug: Optional[str] = None
     support_telegram: Optional[str] = None
+    support_telegram2: Optional[str] = None
     channel_telegram: Optional[str] = None
     marquee_text: Optional[str] = None
     marquee_style: str = "standard"
@@ -24,6 +25,7 @@ async def get_me(user: Dict[str, Any] = Depends(get_current_user)):
         gen_data = s_data.get("general") or {}
         sec_data = s_data.get("security") or {}
         support_telegram = gen_data.get("supportTelegram") or None
+        support_telegram2 = gen_data.get("supportTelegram2") or None
         channel_telegram = gen_data.get("channelTelegram") or None
         marquee_text = (gen_data.get("marqueeText") or "").strip() or None
         marquee_style = (gen_data.get("marqueeStyle") or "standard").strip()
@@ -64,6 +66,7 @@ async def get_me(user: Dict[str, Any] = Depends(get_current_user)):
         "admin": bool(user.get("admin", False)),
         "admin_slug": admin_slug,
         "support_telegram": support_telegram,
+        "support_telegram2": support_telegram2,
         "channel_telegram": channel_telegram,
         "marquee_text": marquee_text,
         "marquee_style": marquee_style,
