@@ -523,6 +523,8 @@ async def buy_iptv_demo(user: Dict[str, Any] = Depends(get_current_user)):
 
 @router.get("/iptv/my-subscriptions")
 async def get_my_iptv_subscriptions(user: Dict[str, Any] = Depends(get_current_user)):
+    service_data = await get_cached_service("iptv")
+    cfg_host = ((service_data or {}).get("config") or {}).get("host") or "http://cf.business-cloud-neo.com"
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
@@ -532,17 +534,30 @@ async def get_my_iptv_subscriptions(user: Dict[str, Any] = Depends(get_current_u
             ORDER BY created_at DESC
             LIMIT 50
         """, user["id"])
+        subs = []
+        for r in rows:
+            raw_url = r["url"] or ""
+            sub_host = ""
+            if raw_url:
+                try:
+                    p = urllib.parse.urlparse(raw_url)
+                    if p.scheme and p.netloc:
+                        sub_host = f"{p.scheme}://{p.netloc}/"
+                except Exception:
+                    pass
+            if not sub_host:
+                base = str(cfg_host).strip()
+                sub_host = base if base.endswith("/") else f"{base}/"
+            subs.append({
+                "id": r["id"],
+                "username": r["username"],
+                "password": r["password"],
+                "months": int(r["months"] or 0),
+                "price": float(r["price"] or 0),
+                "url": r["url"],
+                "host": sub_host,
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None
+            })
         return {
-            "subscriptions": [
-                {
-                    "id": r["id"],
-                    "username": r["username"],
-                    "password": r["password"],
-                    "months": int(r["months"] or 0),
-                    "price": float(r["price"] or 0),
-                    "url": r["url"],
-                    "created_at": r["created_at"].isoformat() if r["created_at"] else None
-                }
-                for r in rows
-            ]
+            "subscriptions": subs
         }
