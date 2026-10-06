@@ -3,8 +3,10 @@ import brotli
 import hmac
 import json
 import os
+import time
 from starlette.types import ASGIApp, Scope, Receive, Send, Message
 from app.config import settings
+from app.services.infrastructure import record_http_request
 
 # =====================================================================
 
@@ -114,3 +116,29 @@ class InternalSecretMiddleware:
             return
 
         await self.app(scope, receive, send)
+ 
+# =====================================================================
+
+class MetricsTrackerMiddleware:
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        start = time.time()
+        status_code = 200
+
+        async def send_wrapper(message: Message) -> None:
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message.get("status", 200)
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            duration_ms = (time.time() - start) * 1000.0
+            record_http_request(status_code, duration_ms)

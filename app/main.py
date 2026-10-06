@@ -9,7 +9,7 @@ from app.routes.admin import router as admin_router
 from app.routes.client_services import router as client_services_router
 from app.routes.bot import router as bot_router
 from app.routes.amendes import router as amendes_router
-from app.middleware import RequestDecompressionMiddleware, InternalSecretMiddleware
+from app.middleware import RequestDecompressionMiddleware, InternalSecretMiddleware, MetricsTrackerMiddleware
 from app.version import get_git_info
 
 # =====================================================================
@@ -49,6 +49,7 @@ origins = DynamicOrigins([
 ])
 
 app.add_middleware(InternalSecretMiddleware)
+app.add_middleware(MetricsTrackerMiddleware)
 app.add_middleware(RequestDecompressionMiddleware)
 app.add_middleware(
     CORSMiddleware,

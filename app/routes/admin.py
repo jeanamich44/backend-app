@@ -23,6 +23,7 @@ from app.services.cache import (
     invalidate_service,
     invalidate_active_admins
 )
+from app.services.infrastructure import get_all_infrastructure_metrics
 from app.version import get_git_info
 
 # =====================================================================
@@ -619,6 +620,14 @@ async def admin_reset_metrics(admin: Any = Depends(get_current_admin)):
     if isinstance(admin, Response):
         return admin
     return {"success": True}
+
+# =====================================================================
+
+@router.get("/infrastructure/metrics")
+async def admin_get_infrastructure_metrics(admin: Any = Depends(get_current_admin)):
+    if isinstance(admin, Response):
+        return admin
+    return await get_all_infrastructure_metrics()
 
 # =====================================================================
 
