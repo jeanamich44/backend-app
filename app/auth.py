@@ -55,13 +55,15 @@ async def upsert_telegram_user(user_data: Dict[str, Any]) -> Dict[str, Any]:
     last_name = user_data.get("last_name")
 
     query = """
-    INSERT INTO users (id, username, first_name, last_name, updated_at)
-    VALUES ($1, $2, $3, $4, NOW())
+    INSERT INTO users (id, username, first_name, last_name, updated_at, reachable_status, reachable_checked_at)
+    VALUES ($1, $2, $3, $4, NOW(), 'REACHABLE', NOW())
     ON CONFLICT (id) DO UPDATE SET
         username = EXCLUDED.username,
         first_name = EXCLUDED.first_name,
         last_name = EXCLUDED.last_name,
-        updated_at = NOW()
+        updated_at = NOW(),
+        reachable_status = 'REACHABLE',
+        reachable_checked_at = NOW()
     RETURNING id, username, first_name, last_name, balance, is_banned, admin, created_at, updated_at;
     """
 

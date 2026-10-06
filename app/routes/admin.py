@@ -24,6 +24,11 @@ from app.services.cache import (
     invalidate_active_admins
 )
 from app.services.infrastructure import get_all_infrastructure_metrics
+from app.services.audience import (
+    get_audience_overview,
+    run_audience_scan,
+    reset_audience_statuses
+)
 from app.version import get_git_info
 
 # =====================================================================
@@ -518,6 +523,7 @@ async def admin_get_users(admin: Any = Depends(get_current_admin)):
         async with pool.acquire() as conn:
             rows = await conn.fetch("""
                 SELECT u.id, u.username, u.first_name, u.balance, u.is_banned, u.admin, u.created_at,
+                       COALESCE(u.reachable_status, 'PENDING') as reachable_status,
                        COALESCE(t.achats, 0) as achats
                 FROM users u
                 LEFT JOIN (
@@ -535,6 +541,7 @@ async def admin_get_users(admin: Any = Depends(get_current_admin)):
                     "solde": float(row["balance"] or 0),
                     "isBanned": bool(row["is_banned"]),
                     "isAdmin": bool(row["admin"]),
+                    "reachableStatus": row["reachable_status"] or "PENDING",
                     "achats": int(row["achats"] or 0)
                 }
                 for idx, row in enumerate(rows)
@@ -628,6 +635,35 @@ async def admin_get_infrastructure_metrics(admin: Any = Depends(get_current_admi
     if isinstance(admin, Response):
         return admin
     return await get_all_infrastructure_metrics()
+
+# =====================================================================
+
+@router.get("/audience")
+async def admin_get_audience(admin: Any = Depends(get_current_admin)):
+    if isinstance(admin, Response):
+        return admin
+    return await get_audience_overview()
+
+# =====================================================================
+
+@router.post("/audience/scan")
+async def admin_scan_audience(
+    batch_size: int = Query(50),
+    admin: Any = Depends(get_current_admin)
+):
+    if isinstance(admin, Response):
+        return admin
+    asyncio.create_task(run_audience_scan(batch_size=batch_size))
+    return {"success": True, "message": "Scan lancé"}
+
+# =====================================================================
+
+@router.post("/audience/reset")
+async def admin_reset_audience(admin: Any = Depends(get_current_admin)):
+    if isinstance(admin, Response):
+        return admin
+    await reset_audience_statuses()
+    return {"success": True}
 
 # =====================================================================
 

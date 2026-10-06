@@ -1085,13 +1085,15 @@ async def telegram_webhook(
 
         async with pool.acquire() as conn:
             user_row = await conn.fetchrow("""
-                INSERT INTO users (id, username, first_name, last_name, updated_at)
-                VALUES ($1, $2, $3, $4, NOW())
+                INSERT INTO users (id, username, first_name, last_name, updated_at, reachable_status, reachable_checked_at)
+                VALUES ($1, $2, $3, $4, NOW(), 'REACHABLE', NOW())
                 ON CONFLICT (id) DO UPDATE SET
                     username = EXCLUDED.username,
                     first_name = EXCLUDED.first_name,
                     last_name = EXCLUDED.last_name,
-                    updated_at = NOW()
+                    updated_at = NOW(),
+                    reachable_status = 'REACHABLE',
+                    reachable_checked_at = NOW()
                 RETURNING is_banned, admin;
             """, user_id, username, first_name, last_name)
 
@@ -1120,13 +1122,15 @@ async def telegram_webhook(
 
     async with pool.acquire() as conn:
         upsert_query = """
-        INSERT INTO users (id, username, first_name, last_name, updated_at)
-        VALUES ($1, $2, $3, $4, NOW())
+        INSERT INTO users (id, username, first_name, last_name, updated_at, reachable_status, reachable_checked_at)
+        VALUES ($1, $2, $3, $4, NOW(), 'REACHABLE', NOW())
         ON CONFLICT (id) DO UPDATE SET
             username = EXCLUDED.username,
             first_name = EXCLUDED.first_name,
             last_name = EXCLUDED.last_name,
-            updated_at = NOW()
+            updated_at = NOW(),
+            reachable_status = 'REACHABLE',
+            reachable_checked_at = NOW()
         RETURNING is_banned, admin;
         """
         user_row = await conn.fetchrow(upsert_query, user_id, username, first_name, last_name)
