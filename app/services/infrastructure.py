@@ -52,9 +52,83 @@ def _format_duration(seconds: float) -> str:
 
 # =====================================================================
 
+def _read_container_cpu_time() -> Optional[float]:
+    cgroup_v2_cpu_stat = "/sys/fs/cgroup/cpu.stat"
+    if os.path.exists(cgroup_v2_cpu_stat):
+        try:
+            with open(cgroup_v2_cpu_stat, "r") as f:
+                for line in f:
+                    if line.startswith("usage_usec"):
+                        usec = float(line.split()[1])
+                        return usec / 1000000.0
+        except Exception:
+            pass
+
+    for p in (
+        "/sys/fs/cgroup/cpuacct/cpuacct.usage",
+        "/sys/fs/cgroup/cpu,cpuacct/cpuacct.usage",
+        "/sys/fs/cgroup/cpu/cpuacct.usage"
+    ):
+        if os.path.exists(p):
+            try:
+                with open(p, "r") as f:
+                    nsec = float(f.read().strip())
+                    return nsec / 1000000000.0
+            except Exception:
+                pass
+
+    if os.path.exists("/proc/self/stat"):
+        try:
+            with open("/proc/self/stat", "r") as f:
+                fields = f.read().split()
+                utime = float(fields[13])
+                stime = float(fields[14])
+                clk_tck = 100.0
+                if hasattr(os, "sysconf") and "SC_CLK_TCK" in os.sysconf_names:
+                    clk_tck = float(os.sysconf("SC_CLK_TCK"))
+                return (utime + stime) / clk_tck
+        except Exception:
+            pass
+
+    return None
+
+# =====================================================================
+
+def _get_container_allocated_cores() -> float:
+    cgroup_v2_cpu_max = "/sys/fs/cgroup/cpu.max"
+    if os.path.exists(cgroup_v2_cpu_max):
+        try:
+            with open(cgroup_v2_cpu_max, "r") as f:
+                parts = f.read().strip().split()
+                if len(parts) >= 2 and parts[0] != "max":
+                    quota = float(parts[0])
+                    period = float(parts[1])
+                    if period > 0:
+                        return round(quota / period, 2)
+        except Exception:
+            pass
+
+    quota_p = "/sys/fs/cgroup/cpu/cpu.cfs_quota_us"
+    period_p = "/sys/fs/cgroup/cpu/cpu.cfs_period_us"
+    if os.path.exists(quota_p) and os.path.exists(period_p):
+        try:
+            with open(quota_p, "r") as f:
+                quota = float(f.read().strip())
+            with open(period_p, "r") as f:
+                period = float(f.read().strip())
+            if quota > 0 and period > 0:
+                return round(quota / period, 2)
+        except Exception:
+            pass
+
+    return 1.0
+
+# =====================================================================
+
 def _get_cpu_info() -> Dict[str, Any]:
     global _LAST_CPU_SAMPLE
-    cores = os.cpu_count() or 1
+    allocated_cores = _get_container_allocated_cores()
+    host_cores = os.cpu_count() or 1
     cpu_percent = 0.0
     now = time.time()
     
@@ -65,33 +139,28 @@ def _get_cpu_info() -> Dict[str, Any]:
         except Exception:
             load_avg = None
 
-    if os.path.exists("/proc/stat"):
-        try:
-            with open("/proc/stat", "r") as f:
-                first_line = f.readline()
-            parts = [float(x) for x in first_line.split()[1:]]
-            idle = parts[3] + (parts[4] if len(parts) > 4 else 0.0)
-            total = sum(parts)
-            if _LAST_CPU_SAMPLE and "total" in _LAST_CPU_SAMPLE:
-                d_total = total - _LAST_CPU_SAMPLE["total"]
-                d_idle = idle - _LAST_CPU_SAMPLE["idle"]
-                if d_total > 0:
-                    cpu_percent = round((1.0 - (d_idle / d_total)) * 100.0, 1)
-            _LAST_CPU_SAMPLE = {"total": total, "idle": idle, "time": now}
-        except Exception:
-            pass
+    container_cpu_time = _read_container_cpu_time()
+
+    if container_cpu_time is not None:
+        if _LAST_CPU_SAMPLE and "cpu_time" in _LAST_CPU_SAMPLE:
+            d_cpu = container_cpu_time - _LAST_CPU_SAMPLE["cpu_time"]
+            d_time = now - _LAST_CPU_SAMPLE["time"]
+            if d_time > 0 and d_cpu >= 0:
+                cpu_percent = round((d_cpu / (d_time * allocated_cores)) * 100.0, 1)
+        _LAST_CPU_SAMPLE = {"cpu_time": container_cpu_time, "time": now}
     else:
         proc_time = time.process_time()
         if _LAST_CPU_SAMPLE and "proc_time" in _LAST_CPU_SAMPLE:
             d_proc = proc_time - _LAST_CPU_SAMPLE["proc_time"]
             d_time = now - _LAST_CPU_SAMPLE["time"]
-            if d_time > 0:
-                cpu_percent = round((d_proc / (d_time * cores)) * 100.0, 1)
+            if d_time > 0 and d_proc >= 0:
+                cpu_percent = round((d_proc / (d_time * allocated_cores)) * 100.0, 1)
         _LAST_CPU_SAMPLE = {"proc_time": proc_time, "time": now}
 
     cpu_percent = max(0.0, min(100.0, cpu_percent))
     return {
-        "cores": cores,
+        "cores": allocated_cores,
+        "host_cores": host_cores,
         "percent": cpu_percent,
         "load_avg": load_avg
     }
@@ -131,7 +200,9 @@ def _get_memory_info() -> Dict[str, Any]:
                 with open(cgroup_v2_max, "r") as f:
                     content = f.read().strip()
                     if content != "max":
-                        cgroup_limit_mb = round(float(content) / (1024.0 * 1024.0), 1)
+                        lim = round(float(content) / (1024.0 * 1024.0), 1)
+                        if lim < 32768.0:
+                            cgroup_limit_mb = lim
         except Exception:
             pass
     elif os.path.exists(cgroup_v1_usage):
@@ -141,30 +212,14 @@ def _get_memory_info() -> Dict[str, Any]:
             if os.path.exists(cgroup_v1_max):
                 with open(cgroup_v1_max, "r") as f:
                     limit_raw = float(f.read().strip())
-                    if limit_raw < 1e15:
-                        cgroup_limit_mb = round(limit_raw / (1024.0 * 1024.0), 1)
+                    if limit_raw < 1e14:
+                        lim = round(limit_raw / (1024.0 * 1024.0), 1)
+                        if lim < 32768.0:
+                            cgroup_limit_mb = lim
         except Exception:
             pass
 
-    if os.path.exists("/proc/meminfo"):
-        try:
-            meminfo: Dict[str, float] = {}
-            with open("/proc/meminfo", "r") as f:
-                for line in f:
-                    parts = line.split(":")
-                    if len(parts) == 2:
-                        k = parts[0].strip()
-                        v = float(parts[1].strip().split()[0])
-                        meminfo[k] = v
-            total_kb = meminfo.get("MemTotal", 524288.0)
-            avail_kb = meminfo.get("MemAvailable", meminfo.get("MemFree", 262144.0))
-            total_mb = round(total_kb / 1024.0, 1)
-            free_mb = round(avail_kb / 1024.0, 1)
-            used_mb = round(max(0.0, total_mb - free_mb), 1)
-            percent = round((used_mb / total_mb) * 100.0, 1) if total_mb > 0 else 0.0
-        except Exception:
-            pass
-    elif os.name == "nt":
+    if os.name == "nt":
         try:
             class MEMORYSTATUSEX(ctypes.Structure):
                 _fields_ = [
@@ -188,17 +243,23 @@ def _get_memory_info() -> Dict[str, Any]:
         except Exception:
             pass
 
-    if cgroup_limit_mb and cgroup_used_mb:
-        percent = round((cgroup_used_mb / cgroup_limit_mb) * 100.0, 1)
+    final_total_mb = cgroup_limit_mb or 512.0
+    final_used_mb = round(max(cgroup_used_mb or 0.0, process_rss_mb), 1)
+    if os.name == "nt" and not cgroup_used_mb and not process_rss_mb:
+        final_used_mb = used_mb
+        final_total_mb = total_mb
+
+    final_free_mb = round(max(0.0, final_total_mb - final_used_mb), 1)
+    percent = round((final_used_mb / final_total_mb) * 100.0, 1) if final_total_mb > 0 else 0.0
 
     return {
-        "total_mb": cgroup_limit_mb or total_mb,
-        "used_mb": cgroup_used_mb or used_mb,
-        "free_mb": round((cgroup_limit_mb or total_mb) - (cgroup_used_mb or used_mb), 1),
+        "total_mb": final_total_mb,
+        "used_mb": final_used_mb,
+        "free_mb": final_free_mb,
         "percent": percent,
         "process_rss_mb": process_rss_mb,
-        "cgroup_limit_mb": cgroup_limit_mb,
-        "cgroup_used_mb": cgroup_used_mb
+        "cgroup_limit_mb": cgroup_limit_mb or 512.0,
+        "cgroup_used_mb": cgroup_used_mb or final_used_mb
     }
 
 # =====================================================================
