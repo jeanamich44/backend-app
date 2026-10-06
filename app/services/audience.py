@@ -167,12 +167,3 @@ async def reset_audience_statuses() -> None:
             UPDATE users 
             SET reachable_status = 'PENDING', reachable_checked_at = NULL
         """)
-        await conn.execute("""
-            UPDATE users 
-            SET reachable_status = 'REACHABLE', reachable_checked_at = NOW()
-            WHERE id IN (
-                SELECT DISTINCT user_id 
-                FROM bot_logs 
-                WHERE created_at > NOW() - INTERVAL '48 hours'
-            )
-        """)
