@@ -1,0 +1,1 @@
+"""Déclaration d'expédition Burberry."""

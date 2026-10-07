@@ -1,0 +1,1 @@
+"""Justificatif de vente Darty."""

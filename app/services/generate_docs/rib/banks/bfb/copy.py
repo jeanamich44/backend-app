@@ -1,0 +1,17 @@
+from . import rib
+
+CIVILITE = "M."
+NOM = "MARTIN"
+PRENOM = "LUCAS"
+TITULAIRE_NOM = "MARTIN LUCAS"
+RUE = "12 RUE DES FLEURS"
+VILLE = "75011 PARIS"
+PAYS = "France"
+
+BANQUE = "16218"
+GUICHET = "00001"
+COMPTE = "31284765011"
+CLE = rib.cle_rib(BANQUE, GUICHET, COMPTE)
+IBAN = rib.iban_fr(BANQUE, GUICHET, COMPTE, CLE)
+BIC = "BFBKFRP1"
+DOMICILIATION = "Tour Franklin, 100-101 Terrasse Boieldieu, La Défense 92042 Paris"

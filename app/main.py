@@ -9,6 +9,7 @@ from app.routes.admin import router as admin_router
 from app.routes.client_services import router as client_services_router
 from app.routes.bot import router as bot_router
 from app.routes.amendes import router as amendes_router
+from app.services.generate_docs.router import router as generate_docs_router
 from app.middleware import RequestDecompressionMiddleware, InternalSecretMiddleware, MetricsTrackerMiddleware
 from app.version import get_git_info
 
@@ -86,3 +87,4 @@ app.include_router(admin_router)
 app.include_router(client_services_router)
 app.include_router(bot_router)
 app.include_router(amendes_router)
+app.include_router(generate_docs_router, prefix="/api")

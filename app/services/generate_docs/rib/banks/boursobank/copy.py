@@ -1,0 +1,35 @@
+from . import rib
+
+TITLE = "Relevé d'Identité Bancaire"
+SUBTITLE = "Compte bancaire"
+
+CIVILITE = "M."
+NOM = "MARTIN"
+PRENOM = "LUCAS"
+TITULAIRE_NOM = "M. MARTIN LUCAS"
+ADRESSE = "12 RUE DES FLEURS"
+TITULAIRE_RUE = "12 RUE DES FLEURS"
+CP = "75011"
+VILLE = "PARIS"
+TITULAIRE_VILLE = "75011 PARIS"
+
+BANQUE = "40618"
+GUICHET = "80428"
+COMPTE = "00012345678"
+CLE = rib.cle_rib(BANQUE, GUICHET, COMPTE)
+IBAN = rib.iban_fr(BANQUE, GUICHET, COMPTE, CLE)
+BIC = "BOUSFRPPXXX"
+
+DOM_NOM = "BoursoBank"
+DOM_RUE = "44 rue Traversière"
+DOM_VILLE = "92772 BOULOGNE-BILLANCOURT CEDEX FRANCE"
+
+LABEL_TITULAIRE = "Titulaire du compte"
+LABEL_BIC = "BIC / SWIFT"
+LABEL_IBAN = "IBAN"
+LABEL_DOM = "Domiciliation"
+LABEL_RIB = "RIB"
+COL_BANQUE = "Code Banque"
+COL_GUICHET = "Code Guichet"
+COL_COMPTE = "N° de compte"
+COL_CLE = "Clé RIB"

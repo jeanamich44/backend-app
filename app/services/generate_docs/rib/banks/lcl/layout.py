@@ -1,0 +1,123 @@
+"""Calage page A4 Skia (Y PyMuPDF depuis le haut). Trois coupons."""
+
+PAGE_W = 594.96
+PAGE_H = 841.92
+
+FONT = "Verdana"
+FONT_BOLD = "Verdana-Bold"
+FONT_FILE = "Verdana.ttf"
+FONT_BOLD_FILE = "Verdana-Bold.ttf"
+
+FONT_ASCENT = 1005
+FONT_DESCENT = -210
+FONT_BBOX = (-560, -303, 1523, 1051)
+FONT_BOLD_BBOX = (-550, -303, 1707, 1072)
+FONT_CAP = 727
+
+COLOR = "#000000"
+NAVY = "#003366"
+BEVEL_DARK = "#2C2C2C"
+BEVEL_LIGHT = "#979797"
+
+CARD_COUNT = 3
+CARD_DY = 221.0
+
+
+def dy(i: int) -> float:
+    return i * CARD_DY
+
+
+def dy_nat(i: int) -> float:
+    """Skia : grille NAT + titre INTL + libellé, −0.5 dès le 2e coupon."""
+    return i * CARD_DY - (0.5 if i else 0.0)
+
+
+def dy_c3(i: int) -> float:
+    """Skia : haut du cadre outer + 2e ligne de notice, −0.5 sur le 3e coupon."""
+    return i * CARD_DY - (0.5 if i == 2 else 0.0)
+
+
+LOGO_FILE = "lcl.png"
+LOGO_X = 145.00
+LOGO_Y_TOP = 119.25
+LOGO_W = 86.00
+LOGO_H = 20.00
+
+TITLE_FONT = FONT_BOLD
+TITLE_SIZE = 5.50
+TITLE_COLOR = NAVY
+TITLE_X = 255.70
+TITLE_Y = 130.75
+TITLE_W = 200.00
+MAX_TITLE = 40
+
+NOTICE_X = 145.20
+NOTICE_Y = 147.25
+NOTICE_LEADING = 5.50
+NOTICE_W = 390.00
+NOTICE_SIZE = 4.425
+MAX_NOTICE = 500
+
+NAT_TITLE_X = 145.20
+NAT_TITLE_Y = 174.75
+INTL_TITLE_X = 145.20
+INTL_TITLE_Y = 232.25
+SECTION_SIZE = 5.50
+
+BOX_OUTER = (141.00, 115.25, 537.50, 301.25)
+BOX_NAT = (145.00, 188.25, 533.00, 215.25)
+BOX_INTL = (145.00, 245.25, 533.00, 272.25)
+BEVEL_OUTER = 1.00
+BEVEL_INNER = 0.50
+
+NAT_HEAD_Y = 198.25
+NAT_VAL_Y = 210.75
+NAT_HEAD_BOX_Y = (189.75, 201.25)
+NAT_VAL_BOX_Y = (202.25, 213.75)
+NAT_COLS = (
+    (146.50, 211.50),
+    (212.50, 255.50),
+    (256.50, 350.50),
+    (351.50, 388.50),
+    (389.50, 531.50),
+)
+# Origines X du gabarit (labels centrés mesurés, pas recalculés).
+NAT_HEAD_X = (153.51, 217.30, 266.02, 355.43, 434.81)
+
+INTL_HEAD_Y = 255.25
+INTL_VAL_Y = 267.75
+INTL_HEAD_BOX_Y = (246.75, 258.25)
+INTL_VAL_BOX_Y = (259.25, 270.75)
+INTL_COLS = (
+    (146.50, 398.00),
+    (399.00, 531.50),
+)
+INTL_HEAD_X = (262.08, 426.33)
+
+TITULAIRE_LABEL_X = 145.20
+TITULAIRE_Y = 289.25
+TITULAIRE_SIZE = 5.50
+TITULAIRE_W = 380.00
+MAX_NOM = 70
+
+LIBELLE_X = 141.00
+LIBELLE_Y = 320.25
+LIBELLE_SIZE = 5.33
+
+SEP_X0 = 141.00
+SEP_X1 = 626.00
+SEP_CLIP_X1 = 559.50
+SEP_Y = 327.25
+SEP_H = 0.50
+SEP_DASH_ON = 1.50
+SEP_DASH_GAP = 1.00518798828125
+
+SIZE_FIELD = 7.00
+
+MAX_BANQUE = 5
+MAX_GUICHET = 5
+MAX_COMPTE = 11
+MAX_CLE = 2
+MAX_IBAN = 34
+MAX_BIC = 11
+MAX_DOM = 40

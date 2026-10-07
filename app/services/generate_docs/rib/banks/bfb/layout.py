@@ -1,0 +1,84 @@
+"""Calage page (coordonnées type PyMuPDF : Y depuis le haut)."""
+
+PAGE_W = 595.0
+PAGE_H = 842.0
+
+FONT = "Arimo-Regular"
+FONT_FILE = "Arimo-Regular.ttf"
+FONT_SIZE = 11.0
+COLOR_TEXT = "#000000"
+COLOR_DOM = "#0e0e14"
+
+LOGO_FILE = "bfb.svg"
+LOGO_X = 34.25
+LOGO_Y_TOP = 42.23
+LOGO_W = 125.13
+LOGO_H = 27.63
+
+ADDR_X = 34.07
+ADDR_YS = (104.81, 120.56, 136.32, 152.07)
+ADDR_W = 500.0
+
+TITLE_SVG = "title.svg"
+TITLE_X = 32.00
+TITLE_Y_TOP = 220.32
+TITLE_W = 242.98
+TITLE_H = 14.81
+
+CARD_SVG = "card.svg"
+CARD_X = 31.00
+CARD_Y_TOP = 253.97
+CARD_W = 533.00
+CARD_H = 294.00
+
+LABEL_TITULAIRE = ("label_titulaire.svg", 48.00, 272.69, 62.15, 12.32)
+TITULAIRE_X = 49.78
+TITULAIRE_Y = 302.42
+TITULAIRE_W = 500.0
+
+LABEL_IBAN = ("label_iban.svg", 48.00, 325.50, 243.71, 8.57)
+IBAN_X = 49.13
+IBAN_Y = 354.13
+IBAN_W = 500.0
+
+LABEL_BIC = ("label_bic.svg", 48.00, 376.48, 172.01, 8.59)
+BIC_X = 49.78
+BIC_Y = 405.18
+BIC_W = 400.0
+
+LABEL_RIB = ("label_rib.svg", 48.00, 427.21, 178.76, 8.85)
+LABEL_BANQUE = ("label_code_banque.svg", 48.00, 447.83, 77.66, 11.02)
+LABEL_GUICHET = ("label_code_guichet.svg", 174.75, 447.50, 76.61, 11.46)
+LABEL_COMPTE = ("label_numero_compte.svg", 301.50, 447.21, 110.45, 11.64)
+LABEL_CLE = ("label_cle_rib.svg", 428.25, 447.21, 38.50, 8.85)
+TABLE_Y = 477.18
+BANQUE_X = 50.44
+GUICHET_X = 176.76
+COMPTE_X = 303.75
+CLE_X = 430.73
+BANQUE_W = 120.0
+GUICHET_W = 120.0
+COMPTE_W = 120.0
+CLE_W = 100.0
+
+LABEL_DOM = ("label_domiciliation.svg", 48.00, 499.50, 74.67, 8.57)
+DOM_SVG = "domiciliation.svg"
+DOM_SVG_X = 48.00
+DOM_SVG_Y_TOP = 515.39
+DOM_SVG_W = 432.19
+DOM_SVG_H = 12.32
+DOM_X = 48.00
+DOM_Y = 525.35
+DOM_W = 500.0
+
+MAX_NOM = 40
+MAX_RUE = 42
+MAX_VILLE = 40
+MAX_PAYS = 20
+MAX_BANQUE = 5
+MAX_GUICHET = 5
+MAX_COMPTE = 11
+MAX_CLE = 2
+MAX_IBAN = 34
+MAX_BIC = 11
+MAX_DOM = 80
