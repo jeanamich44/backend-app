@@ -65,6 +65,8 @@ def _as_bool(value, default: bool = True) -> bool:
         return bool(value)
     if isinstance(value, str):
         return value.strip().lower() not in {"0", "false", "off", "no", ""}
+    if isinstance(value, dict):
+        return _as_bool(value.get("enabled", value.get("active", default)), default)
     return default
 
 
@@ -88,7 +90,7 @@ def normalize_generate_docs_config(raw) -> dict:
             enabled = _as_bool(info.get("active", info.get("enabled")), default)
             docs = info.get("documents")
             if isinstance(docs, dict):
-                documents = {k: _as_bool(v, True) for k, v in docs.items()}
+                documents = {k: {"enabled": _as_bool(v, True)} for k, v in docs.items()}
         elif info is not None:
             enabled = _as_bool(info, default)
         subcategories[key] = {"active": enabled, "enabled": enabled, "documents": documents}

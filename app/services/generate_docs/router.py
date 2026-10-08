@@ -56,7 +56,11 @@ from app.services.generate_docs.emploi import (
 from app.services.generate_docs.releve.lbp import generate_lbp_preview_pdf_bytes, generate_lbp_releves_bytes
 from app.services.generate_docs.releve.schemas import ReleveLBPGenerateRequest
 from app.services.generate_docs.rib.schemas import RibGenerateRequest
-from app.services.generate_docs.config import invalidate_generate_docs_config_cache, load_generate_docs_config
+from app.services.generate_docs.config import (
+    _as_bool,
+    invalidate_generate_docs_config_cache,
+    load_generate_docs_config,
+)
 from app.services.generate_docs.common.preview import flatten_pdf_bytes, flatten_zip_bytes
 from app.services.generate_docs.rib.service import (
     BANKS,
@@ -150,7 +154,7 @@ async def _guard_document_access(
         subs = cfg.get("subcategories", {})
         cat_info = subs.get(category, {})
         docs_map = cat_info.get("documents", {})
-        if docs_map and slug in docs_map and docs_map[slug] is False:
+        if docs_map and slug in docs_map and not _as_bool(docs_map[slug], True):
             raise HTTPException(
                 status_code=403,
                 detail=f"Le document '{slug}' est actuellement désactivé",

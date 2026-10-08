@@ -31,6 +31,7 @@ from app.services.audience import (
     reset_audience_statuses
 )
 from app.version import get_git_info
+from app.services.generate_docs.config import invalidate_generate_docs_config_cache
 
 # =====================================================================
 
@@ -1398,6 +1399,7 @@ async def admin_save_generate_docs(payload: GenerateDocsSettingsPayload, admin: 
             is_active, json.dumps(cfg_data), json.dumps(pr_data)
         )
     invalidate_service("generate-docs")
+    invalidate_generate_docs_config_cache()
     return {"success": True}
 
 # =====================================================================

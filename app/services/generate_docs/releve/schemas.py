@@ -1,7 +1,9 @@
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class ReleveLBPGenerateRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     mode: str = "facile"
     duree_mois: int = Field(1, ge=1, le=12)
     mois_debut: int = Field(1, ge=1, le=12)
@@ -9,7 +11,9 @@ class ReleveLBPGenerateRequest(BaseModel):
     numero_releve_debut: int = Field(1, ge=1)
 
     civilite: str = "M."
-    nom_prenom: str = "MARTIN LUCAS"
+    nom: Optional[str] = "MARTIN"
+    prenom: Optional[str] = "LUCAS"
+    nom_prenom: Optional[str] = None
     adresse: str = "12 RUE DES FLEURS"
     complement_adresse: Optional[str] = None
     cp: str = "75011"

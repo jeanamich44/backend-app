@@ -95,7 +95,16 @@ def parse_currency_french(val_str):
 
 def build_mode_facile(user_params):
     profil = user_params.get("profil", "normal")
-    nom_input = (user_params.get("nom_prenom") or user_params.get("titulaire_nom_complet") or user_params.get("titulaire_nom") or user_params.get("nom_complet") or "").strip()
+    nom_part = (user_params.get("nom") or "").strip()
+    prenom_part = (user_params.get("prenom") or "").strip()
+    if nom_part or prenom_part:
+        nom_input = f"{nom_part} {prenom_part}".strip()
+    else:
+        nom_input = (user_params.get("nom_prenom") or user_params.get("titulaire_nom_complet") or user_params.get("titulaire_nom") or user_params.get("nom_complet") or "").strip()
+        if nom_input:
+            parts = nom_input.split(None, 1)
+            nom_part = parts[0]
+            prenom_part = parts[1] if len(parts) > 1 else ""
     civ_input = (user_params.get("civilite") or "M.").strip()
     
     if nom_input:
@@ -177,6 +186,9 @@ def build_mode_facile(user_params):
         "profil": profil,
         "wealth_profile": wealth_profile,
         "age_profile": age_profile,
+        "nom": nom_part,
+        "prenom": prenom_part,
+        "nom_prenom": cleaned_nom,
         "titulaire_nom": nom_complet,
         "titulaire_nom_complet": nom_complet,
         "titulaire_sexe": sexe,
@@ -655,6 +667,9 @@ def generate_multi_releves(config, start_month, start_year, duration_months=3):
             "date_ancien_solde": date_ancien_solde,
             "date_nouveau_solde": date_releve,
             "date_edition": date_edition_val,
+            "nom": runtime_cfg.get("nom", ""),
+            "prenom": runtime_cfg.get("prenom", ""),
+            "nom_prenom": runtime_cfg.get("nom_prenom", ""),
             "titulaire_nom": runtime_cfg["titulaire_nom"],
             "titulaire_nom_complet": runtime_cfg.get("titulaire_nom_complet", runtime_cfg["titulaire_nom"]),
             "titulaire_adresse1": runtime_cfg.get("complement_adresse", ""),

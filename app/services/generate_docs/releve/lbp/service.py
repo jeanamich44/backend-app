@@ -53,7 +53,22 @@ def map_request_to_config(req_data: dict) -> dict:
     mode = req_data.get("mode", "facile")
     
     civ = (req_data.get("civilite") or "M.").strip()
-    np_val = (req_data.get("nom_prenom") or req_data.get("titulaire_nom_complet") or req_data.get("titulaire_nom") or "").strip()
+    nom = (req_data.get("nom") or "").strip()
+    prenom = (req_data.get("prenom") or "").strip()
+
+    if nom or prenom:
+        np_val = f"{nom} {prenom}".strip()
+    else:
+        np_val = (req_data.get("nom_prenom") or req_data.get("titulaire_nom_complet") or req_data.get("titulaire_nom") or "").strip()
+        if np_val:
+            parts = np_val.split(None, 1)
+            nom = parts[0]
+            prenom = parts[1] if len(parts) > 1 else ""
+        else:
+            nom = "MARTIN"
+            prenom = "LUCAS"
+            np_val = "MARTIN LUCAS"
+
     nom_complet = clean_and_format_nom_complet(civ, np_val)
     
     cfg = {
@@ -61,10 +76,12 @@ def map_request_to_config(req_data: dict) -> dict:
         "mode": mode,
         "profil": req_data.get("profil", "normal"),
         "wealth_profile": req_data.get("wealth_profile", "moyen"),
+        "nom": nom,
+        "prenom": prenom,
+        "nom_prenom": np_val,
         "titulaire_nom": nom_complet,
         "titulaire_nom_complet": nom_complet,
         "civilite": civ,
-        "nom_prenom": np_val,
         "adresse": req_data.get("adresse") or "15 RUE DE LA PAIX",
         "complement_adresse": req_data.get("complement_adresse") or "",
         "cp": req_data.get("cp") or "75001",
