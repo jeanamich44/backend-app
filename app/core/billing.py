@@ -12,32 +12,31 @@ _SERVICES_CACHE: dict[str, dict] = {}
 _SERVICES_CACHE_TTL = 30.0
 
 GENERATE_DOCS_NEW_PRICES = {
-    "adidas": 1.0,
-    "amazon": 1.0,
-    "fnac": 1.0,
-    "nike": 1.0,
-    "ami": 1.0,
-    "burberry": 1.0,
-    "cdiscount": 1.0,
-    "dafy": 1.0,
-    "darty": 1.0,
-    "boulanger": 1.0,
-    "gaz": 1.0,
-    "loro_piana": 1.0,
-    "pack_moto": 1.0,
-    "dior": 1.0,
-    "jacquemus": 1.0,
-    "chanel": 1.0,
-    "channel": 1.0,
-    "fred": 1.0,
-    "nocibe": 1.0,
-    "sfr": 1.0,
-    "conduite_heures": 1.0,
-    "attestation_edf": 1.0,
-    "attestation_direct_energie": 1.0,
-    "axa": 1.0,
-    "maxance": 1.0,
-    "fiche_de_paie": 8.0,
+    "adidas": 5.0,
+    "amazon": 5.0,
+    "fnac": 5.0,
+    "nike": 5.0,
+    "ami": 5.0,
+    "burberry": 5.0,
+    "cdiscount": 5.0,
+    "dafy": 5.0,
+    "darty": 5.0,
+    "boulanger": 5.0,
+    "gaz": 5.0,
+    "loro_piana": 5.0,
+    "pack_moto": 5.0,
+    "dior": 5.0,
+    "jacquemus": 5.0,
+    "chanel": 5.0,
+    "channel": 5.0,
+    "fred": 5.0,
+    "nocibe": 5.0,
+    "sfr": 5.0,
+    "conduite_heures": 5.0,
+    "attestation_edf": 5.0,
+    "attestation_direct_energie": 5.0,
+    "axa": 5.0,
+    "maxance": 5.0,
     "fiche_de_paie_1m": 8.0,
     "fiche_de_paie_3m": 20.0,
     "fiche_de_paie_6m": 40.0,
@@ -114,6 +113,8 @@ async def get_service_price(db_pool: Any, service_slug: str, action_type: str) -
     prices_dict = svc["prices"]
 
     if action_type not in prices_dict:
+        if action_type == "fiche_de_paie" and "fiche_de_paie_1m" in prices_dict:
+            return float(prices_dict["fiche_de_paie_1m"]), svc["id"]
         if service_slug == "generate-docs" and action_type in GENERATE_DOCS_NEW_PRICES:
             return float(GENERATE_DOCS_NEW_PRICES[action_type]), svc["id"]
         raise HTTPException(
