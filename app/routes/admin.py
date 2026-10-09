@@ -17,7 +17,7 @@ from app.auth import validate_telegram_init_data
 from app.config import settings
 from app.db import get_db_pool
 from app.services.iptv_panel import get_reseller_panel_stats
-from app.services.telegram import send_telegram_message, edit_telegram_message_text
+from app.services.telegram import send_telegram_message, edit_telegram_message_text, set_telegram_bot_name
 from app.services.cache import (
     get_cached_settings,
     invalidate_settings,
@@ -1471,7 +1471,14 @@ async def admin_save_general(payload: GeneralSettingsPayload, admin: Any = Depen
                 raise HTTPException(status_code=400, detail="Le token bot Telegram ne peut pas être vide")
             gen_data["telegramBotToken"] = val
         if payload.botName is not None:
-            gen_data["botName"] = payload.botName.strip()
+            new_bot_name = payload.botName.strip()
+            gen_data["botName"] = new_bot_name
+            active_token = gen_data.get("telegramBotToken") or settings.telegram_bot_token
+            if active_token and new_bot_name:
+                try:
+                    await set_telegram_bot_name(new_bot_name, token=active_token)
+                except Exception:
+                    pass
         if payload.supportTelegram is not None:
             gen_data["supportTelegram"] = payload.supportTelegram.strip()
         if payload.supportTelegram2 is not None:

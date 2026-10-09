@@ -19,11 +19,13 @@ async def get_me(user: Dict[str, Any] = Depends(get_current_user)):
     channel_telegram: Optional[str] = None
     marquee_text: Optional[str] = None
     marquee_style: str = "standard"
+    bot_name: Optional[str] = None
 
     s_data = await get_cached_settings()
     if s_data:
         gen_data = s_data.get("general") or {}
         sec_data = s_data.get("security") or {}
+        bot_name = (gen_data.get("botName") or "").strip() or None
         support_telegram = gen_data.get("supportTelegram") or None
         support_telegram2 = gen_data.get("supportTelegram2") or None
         channel_telegram = gen_data.get("channelTelegram") or None
@@ -65,6 +67,7 @@ async def get_me(user: Dict[str, Any] = Depends(get_current_user)):
         "balance": user["balance"],
         "admin": bool(user.get("admin", False)),
         "admin_slug": admin_slug,
+        "bot_name": bot_name,
         "support_telegram": support_telegram,
         "support_telegram2": support_telegram2,
         "channel_telegram": channel_telegram,

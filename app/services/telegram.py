@@ -323,3 +323,16 @@ async def set_telegram_menu_button(web_app_url: str) -> Dict[str, Any]:
     client = _get_client()
     resp = await client.post(url, json=payload)
     return resp.json()
+
+# =====================================================================
+
+async def set_telegram_bot_name(name: str, token: Optional[str] = None) -> Dict[str, Any]:
+    bot_token = token or settings.telegram_bot_token
+    if not bot_token:
+        raise ValueError("telegram_bot_token non configure")
+
+    url = f"https://api.telegram.org/bot{bot_token}/setMyName"
+    payload = {"name": name}
+    client = _get_client()
+    resp = await client.post(url, json=payload)
+    return resp.json()
