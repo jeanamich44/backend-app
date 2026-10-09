@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 import io
 import zipfile
 import pymupdf as fitz
@@ -59,7 +60,7 @@ def flatten_pdf_bytes(pdf_bytes: bytes, dpi: int = 300, jpg_quality: int = 92) -
             img_bytes = pix.tobytes(output="jpeg", jpg_quality=jpg_quality)
             new_page = new_doc.new_page(width=page.rect.width, height=page.rect.height)
             new_page.insert_image(page.rect, stream=img_bytes)
-        return new_doc.tobytes(deflate=True, garbage=3)
+        return new_doc.tobytes(deflate=False, garbage=0)
     finally:
         doc.close()
 
@@ -67,11 +68,22 @@ def flatten_pdf_bytes(pdf_bytes: bytes, dpi: int = 300, jpg_quality: int = 92) -
 def flatten_zip_bytes(zip_bytes: bytes, dpi: int = 300, jpg_quality: int = 92) -> bytes:
     buf_in = io.BytesIO(zip_bytes)
     buf_out = io.BytesIO()
-    with zipfile.ZipFile(buf_in, "r") as zf_in, zipfile.ZipFile(buf_out, "w", zipfile.ZIP_DEFLATED) as zf_out:
-        for item in zf_in.infolist():
-            content = zf_in.read(item.filename)
-            if item.filename.lower().endswith(".pdf"):
-                content = flatten_pdf_bytes(content, dpi=dpi, jpg_quality=jpg_quality)
+    with zipfile.ZipFile(buf_in, "r") as zf_in:
+        items = zf_in.infolist()
+        entries = [(item, zf_in.read(item.filename)) for item in items]
+
+    def _process_item(entry):
+        item, content = entry
+        if item.filename.lower().endswith(".pdf"):
+            return item, flatten_pdf_bytes(content, dpi=dpi, jpg_quality=jpg_quality)
+        return item, content
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        results = list(executor.map(_process_item, entries))
+
+    with zipfile.ZipFile(buf_out, "w", zipfile.ZIP_STORED) as zf_out:
+        for item, content in results:
             zf_out.writestr(item, content)
+
     return buf_out.getvalue()
 

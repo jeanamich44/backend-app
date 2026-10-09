@@ -585,7 +585,7 @@ async def admin_stats(admin: Any = Depends(get_current_admin)):
         gd_data["conversionRate"] = round((total_doc_generations / gd_data["totalPreviews"] * 100), 1)
 
     commands_executed = total_transactions + total_doc_generations + amendes_count + bot_logs_count
-    telegram_received = bot_logs_count + total_users
+    telegram_received = bot_logs_count
     telegram_sent = bot_logs_count + total_transactions + total_doc_generations + amendes_count
 
     errors_count = get_error_counts()
@@ -852,8 +852,14 @@ async def admin_reset_metrics(admin: Any = Depends(get_current_admin)):
                 )
                 WHERE slug = 'generate-docs'
             """)
+            await conn.execute("DELETE FROM generations")
+            await conn.execute("DELETE FROM bot_logs")
+            await conn.execute("DELETE FROM transactions")
+            await conn.execute("DELETE FROM payments")
+            await conn.execute("DELETE FROM amendes")
         except Exception:
             pass
+    invalidate_generate_docs_config_cache()
     return {"success": True}
 
 # =====================================================================
