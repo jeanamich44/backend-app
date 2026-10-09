@@ -21,9 +21,9 @@ class ReleveLBPGenerateRequest(BaseModel):
     centre_financier: str = "PARIS CENTRE FINANCIER"
 
     identifiant: str = "1455835203"
-    iban: str = "FR7620041010010012345678984"
-    numero_compte: str = "00123456789"
-    cle_compte: str = "84"
+    iban: str = "FR9020041010011452934L02557"
+    numero_compte: str = "1452934L025"
+    cle_compte: str = "57"
     bic: str = "PSSTFRPPPAR"
     card_number: str = "456"
     decouvert_autorise: str = "300,00"
