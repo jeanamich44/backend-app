@@ -618,6 +618,13 @@ async def admin_stats(admin: Any = Depends(get_current_admin)):
     clean_days7 = [{"label": item["label"], "volume": item["volume"]} for item in days7_graph_slots]
     clean_days30 = [{"label": item["label"], "volume": item["volume"]} for item in days30_graph_slots]
 
+    distribution = {
+        "telegram": telegram_received + telegram_sent,
+        "generateDocs": gd_data["totalPreviews"] + total_doc_generations,
+        "payments": sumup_received + sumup_sent + oxapay_received + oxapay_sent,
+        "system": commands_executed + errors_count + 1
+    }
+
     graph = {
         "today": today_graph_slots,
         "days7": clean_days7,
@@ -634,6 +641,7 @@ async def admin_stats(admin: Any = Depends(get_current_admin)):
         "maintenance": maintenance_mode,
         "metrics": metrics,
         "totalTraffic": total_traffic,
+        "distribution": distribution,
         "generateDocs": gd_data,
         "graph": graph,
         "users_count": int(total_users),
