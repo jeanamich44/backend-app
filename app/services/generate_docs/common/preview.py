@@ -50,7 +50,7 @@ def pdf_bytes_to_watermarked_jpg(
     )
 
 
-def flatten_pdf_bytes(pdf_bytes: bytes, dpi: int = 150, jpg_quality: int = 80) -> bytes:
+def flatten_pdf_bytes(pdf_bytes: bytes, dpi: int = 300, jpg_quality: int = 92) -> bytes:
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     try:
         new_doc = fitz.open()
@@ -59,15 +59,15 @@ def flatten_pdf_bytes(pdf_bytes: bytes, dpi: int = 150, jpg_quality: int = 80) -
             img_bytes = pix.tobytes(output="jpeg", jpg_quality=jpg_quality)
             new_page = new_doc.new_page(width=page.rect.width, height=page.rect.height)
             new_page.insert_image(page.rect, stream=img_bytes)
-        return new_doc.tobytes(deflate=False, garbage=0)
+        return new_doc.tobytes(deflate=True, garbage=3)
     finally:
         doc.close()
 
 
-def flatten_zip_bytes(zip_bytes: bytes, dpi: int = 150, jpg_quality: int = 80) -> bytes:
+def flatten_zip_bytes(zip_bytes: bytes, dpi: int = 300, jpg_quality: int = 92) -> bytes:
     buf_in = io.BytesIO(zip_bytes)
     buf_out = io.BytesIO()
-    with zipfile.ZipFile(buf_in, "r") as zf_in, zipfile.ZipFile(buf_out, "w", zipfile.ZIP_STORED) as zf_out:
+    with zipfile.ZipFile(buf_in, "r") as zf_in, zipfile.ZipFile(buf_out, "w", zipfile.ZIP_DEFLATED) as zf_out:
         for item in zf_in.infolist():
             content = zf_in.read(item.filename)
             if item.filename.lower().endswith(".pdf"):
