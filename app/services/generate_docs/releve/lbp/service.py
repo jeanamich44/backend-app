@@ -80,9 +80,9 @@ def map_request_to_config(req_data: dict) -> dict:
         cle_compte = cle_raw or iban_raw[25:27]
         iban_final = iban_raw
     else:
-        account_num = acc_raw or "00123456789"
-        cle_compte = cle_raw or "84"
-        iban_final = iban_raw or "FR7620041010010012345678984"
+        account_num = acc_raw or "1452934L025"
+        cle_compte = cle_raw or "57"
+        iban_final = iban_raw or "FR9020041010011452934L02557"
     
     cfg = {
         "bank_type": "lbp",
