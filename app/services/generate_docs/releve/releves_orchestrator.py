@@ -222,6 +222,7 @@ def build_mode_facile(user_params):
         "annexe_info_type": user_params.get("annexe_info_type", "auto"),
         "annexe_info_custom_text": user_params.get("annexe_info_custom_text", ""),
         "show_annexe_carbone": user_params.get("show_annexe_carbone", True),
+        "target_solde_final": user_params.get("target_solde_final"),
         "custom_transactions": user_params.get("custom_transactions", [])
     }
 
@@ -249,6 +250,7 @@ def build_mode_personnalise(user_params):
     base_cfg["annexe_info_custom_text"] = user_params.get("annexe_info_custom_text", "")
     base_cfg["show_annexe_carbone"] = user_params.get("show_annexe_carbone", True)
     base_cfg["target_deltas_sequence"] = user_params.get("target_deltas_sequence")
+    base_cfg["target_solde_final"] = user_params.get("target_solde_final", base_cfg.get("target_solde_final"))
     base_cfg["has_epargne"] = bool(user_params.get("has_epargne", user_params.get("include_epargne", False)))
     base_cfg["include_epargne"] = bool(user_params.get("has_epargne", user_params.get("include_epargne", False)))
     base_cfg["custom_transactions"] = user_params.get("custom_transactions", base_cfg.get("custom_transactions", []))
@@ -347,10 +349,8 @@ def generate_multi_releves(config, start_month, start_year, duration_months=3):
         }
 
     target_sf = runtime_cfg.get("target_solde_final")
-    if target_sf:
-        target_sf_float = parse_currency_french(target_sf)
-        total_delta_needed = target_sf_float - current_ccp_solde
-        base_monthly = total_delta_needed / duration_months
+    if target_sf is not None and str(target_sf).strip():
+        target_sf_float = parse_currency_french(target_sf) if isinstance(target_sf, str) else float(target_sf)
     else:
         target_sf_float = None
 
@@ -412,8 +412,13 @@ def generate_multi_releves(config, start_month, start_year, duration_months=3):
         if deltas_seq and idx < len(deltas_seq):
             monthly_delta = float(deltas_seq[idx])
         elif target_sf_float is not None:
-            variance = round(random.uniform(-80.0, 80.0), 2)
-            monthly_delta = round(base_monthly + variance, 2)
+            remaining_months = len(months_seq) - idx
+            if remaining_months <= 1:
+                monthly_delta = round(target_sf_float - current_ccp_solde, 2)
+            else:
+                base_needed = (target_sf_float - current_ccp_solde) / remaining_months
+                variance = round(random.uniform(-30.0, 30.0), 2)
+                monthly_delta = round(base_needed + variance, 2)
         else:
             if runtime_cfg.get("dossier_type") == "credit_immo":
                 monthly_delta = round(random.uniform(150.0, 650.0), 2)
@@ -644,6 +649,16 @@ def generate_multi_releves(config, start_month, start_year, duration_months=3):
         injected = runtime_cfg.get("injected_transactions_per_month", {}).get(m)
         if injected:
             txs_ccp.extend(injected)
+            
+        if (target_sf_float is not None) or (deltas_seq and idx < len(deltas_seq)):
+            txs_ccp = gt.calibrate_transactions_to_delta(
+                txs_ccp,
+                monthly_delta,
+                city=runtime_cfg["titulaire_ville"],
+                month=str(m),
+                year=str(y),
+                wealth_profile=runtime_cfg["wealth_profile"]
+            )
             
         txs_ccp.sort(key=gt.get_tx_date_sort_key)
             

@@ -2427,7 +2427,7 @@ def calibrate_transactions_to_delta(txs, target_delta, city="PARIS", month="01",
             sum_debits = sum(abs(get_tx_delta(t)) for t in debits)
             required_credits = round(sum_debits + target_delta, 2)
             
-        non_mirror_credits = [t for t in credits if not t.get('is_mirror')]
+        non_mirror_credits = [t for t in credits if not t.get('is_mirror') and not is_protected_credit(t)]
         primary_incomes = [t for t in non_mirror_credits if is_primary_income(t)]
         flexible_credits = [t for t in non_mirror_credits if not is_protected_credit(t)]
         
@@ -2452,8 +2452,17 @@ def calibrate_transactions_to_delta(txs, target_delta, city="PARIS", month="01",
             orig_amt = pivot.get('amount', 50.0)
             income_floor = min_floor
         else:
-            pivot = credits[0]
-            orig_amt = pivot.get('amount', 50.0)
+            pivot = {
+                "date": f"12/{mois_str}",
+                "lignes": ["VIREMENT EN VOTRE FAVEUR", "DE M OU MME MARTIN"],
+                "montant": "50,00",
+                "signe": "+",
+                "amount": 50.0,
+                "type": "VIREMENT"
+            }
+            txs.append(pivot)
+            credits.append(pivot)
+            orig_amt = 50.0
             income_floor = min_floor
             
         other_credits = [t for t in credits if t is not pivot]
@@ -2546,6 +2555,8 @@ def calibrate_transactions_to_delta(txs, target_delta, city="PARIS", month="01",
         non_mirror_debits = [t for t in debits if not t.get('is_mirror')]
         
         def is_fixed_debit(t):
+            if t.get('is_protected'):
+                return True
             t_type = t.get('type', '')
             l_str = str(t.get('lignes', '')).upper()
             if t.get('is_frais') or t_type == 'FRAIS BANCAIRES':
@@ -2571,8 +2582,8 @@ def calibrate_transactions_to_delta(txs, target_delta, city="PARIS", month="01",
                 return 15.0
             return 5.0
 
-        cb_shopping = [t for t in non_mirror_debits if t.get('type') == 'ACHAT CB' and any(k in str(t.get('lignes', '')).upper() for k in ['IKEA', 'LEROY MERLIN', 'FNAC', 'DARTY', 'AMAZON', 'ZARA', 'DECATHLON', 'ASOS', 'ZALANDO'])]
-        cb_general = [t for t in non_mirror_debits if t.get('type') == 'ACHAT CB']
+        cb_shopping = [t for t in non_mirror_debits if not t.get('is_protected') and t.get('type') == 'ACHAT CB' and any(k in str(t.get('lignes', '')).upper() for k in ['IKEA', 'LEROY MERLIN', 'FNAC', 'DARTY', 'AMAZON', 'ZARA', 'DECATHLON', 'ASOS', 'ZALANDO'])]
+        cb_general = [t for t in non_mirror_debits if not t.get('is_protected') and t.get('type') == 'ACHAT CB']
         flexible_debits = [t for t in non_mirror_debits if not is_fixed_debit(t)]
         
         if cb_shopping:
@@ -2669,19 +2680,19 @@ def calibrate_transactions_to_delta(txs, target_delta, city="PARIS", month="01",
                 cur = get_tx_delta(p)
                 set_tx_amount(p, max(1.0, round(cur + rem, 2)), '+')
             else:
-                flexible_debits = [t for t in txs if not t.get('is_mirror') and not t.get('is_frais') and t.get('type') != 'RETRAIT' and 'RETRAIT' not in str(t.get('lignes', '')).upper() and t.get('signe') == '-']
+                flexible_debits = [t for t in txs if not t.get('is_mirror') and not t.get('is_protected') and not t.get('is_frais') and t.get('type') != 'RETRAIT' and 'RETRAIT' not in str(t.get('lignes', '')).upper() and t.get('signe') == '-']
                 if flexible_debits:
                     d = flexible_debits[0]
                     cur = abs(get_tx_delta(d))
                     set_tx_amount(d, max(1.0, round(cur - rem, 2)), '-')
         else:
-            flexible_debits = [t for t in txs if not t.get('is_mirror') and not t.get('is_frais') and t.get('type') != 'RETRAIT' and 'RETRAIT' not in str(t.get('lignes', '')).upper() and t.get('signe') == '-']
+            flexible_debits = [t for t in txs if not t.get('is_mirror') and not t.get('is_protected') and not t.get('is_frais') and t.get('type') != 'RETRAIT' and 'RETRAIT' not in str(t.get('lignes', '')).upper() and t.get('signe') == '-']
             if flexible_debits:
                 d = flexible_debits[0]
                 cur = abs(get_tx_delta(d))
                 set_tx_amount(d, max(1.0, round(cur + abs(rem), 2)), '-')
             else:
-                non_mirrors = [t for t in txs if not t.get('is_mirror') and t.get('type') != 'RETRAIT' and 'RETRAIT' not in str(t.get('lignes', '')).upper()]
+                non_mirrors = [t for t in txs if not t.get('is_mirror') and not t.get('is_protected') and t.get('type') != 'RETRAIT' and 'RETRAIT' not in str(t.get('lignes', '')).upper()]
                 if non_mirrors:
                     p = non_mirrors[0]
                     cur = abs(get_tx_delta(p))
@@ -2702,6 +2713,21 @@ def calibrate_transactions_to_delta(txs, target_delta, city="PARIS", month="01",
                     cb_adj = cbs[0]
                     cur_cb = abs(parse_tx_amount(cb_adj.get('montant', 0.0)))
                     set_tx_amount(cb_adj, max(1.0, round(cur_cb - diff_to_compensate, 2)), '-')
+            
+    final_cur_sum = round(sum(get_tx_delta(t) for t in txs), 2)
+    final_rem = round(target_delta - final_cur_sum, 2)
+    if final_rem != 0.0:
+        cbs = [c for c in txs if c.get('type') == 'ACHAT CB' and not c.get('is_protected')]
+        if cbs:
+            cb_adj = cbs[0]
+            cur_cb = abs(parse_tx_amount(cb_adj.get('montant', 0.0)))
+            set_tx_amount(cb_adj, max(1.0, round(cur_cb - final_rem, 2)), '-')
+        else:
+            flex_creds = [t for t in txs if not t.get('is_mirror') and not is_protected_credit(t) and t.get('signe') == '+']
+            if flex_creds:
+                p = flex_creds[0]
+                cur = get_tx_delta(p)
+                set_tx_amount(p, max(1.0, round(cur + final_rem, 2)), '+')
             
     txs.sort(key=get_tx_date_sort_key)
     return txs
