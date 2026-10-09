@@ -17,6 +17,7 @@ async def get_me(user: Dict[str, Any] = Depends(get_current_user)):
     support_telegram: Optional[str] = None
     support_telegram2: Optional[str] = None
     channel_telegram: Optional[str] = None
+    channel_backup_telegram: Optional[str] = None
     marquee_text: Optional[str] = None
     marquee_style: str = "standard"
     bot_name: Optional[str] = None
@@ -29,6 +30,7 @@ async def get_me(user: Dict[str, Any] = Depends(get_current_user)):
         support_telegram = gen_data.get("supportTelegram") or None
         support_telegram2 = gen_data.get("supportTelegram2") or None
         channel_telegram = gen_data.get("channelTelegram") or None
+        channel_backup_telegram = gen_data.get("channelBackupTelegram") or None
         marquee_text = (gen_data.get("marqueeText") or "").strip() or None
         marquee_style = (gen_data.get("marqueeStyle") or "standard").strip()
         if user.get("admin") is True:
@@ -71,6 +73,7 @@ async def get_me(user: Dict[str, Any] = Depends(get_current_user)):
         "support_telegram": support_telegram,
         "support_telegram2": support_telegram2,
         "channel_telegram": channel_telegram,
+        "channel_backup_telegram": channel_backup_telegram,
         "marquee_text": marquee_text,
         "marquee_style": marquee_style,
         "services": services_status,

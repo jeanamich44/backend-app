@@ -123,6 +123,7 @@ class GeneralSettingsPayload(BaseModel):
     supportTelegram: Optional[str] = None
     supportTelegram2: Optional[str] = None
     channelTelegram: Optional[str] = None
+    channelBackupTelegram: Optional[str] = None
     backendUrl: Optional[str] = None
     marqueeText: Optional[str] = None
     marqueeStyle: Optional[str] = None
@@ -1119,6 +1120,7 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
         "supportTelegram": gen_data.get("supportTelegram", ""),
         "supportTelegram2": gen_data.get("supportTelegram2", ""),
         "channelTelegram": gen_data.get("channelTelegram", ""),
+        "channelBackupTelegram": gen_data.get("channelBackupTelegram", ""),
         "backendUrl": gen_data.get("backendUrl") or os.getenv("RENDER_EXTERNAL_URL") or os.getenv("BACKEND_URL") or "",
         "marqueeText": gen_data.get("marqueeText", ""),
         "marqueeStyle": gen_data.get("marqueeStyle", "standard"),
@@ -1485,6 +1487,8 @@ async def admin_save_general(payload: GeneralSettingsPayload, admin: Any = Depen
             gen_data["supportTelegram2"] = payload.supportTelegram2.strip()
         if payload.channelTelegram is not None:
             gen_data["channelTelegram"] = payload.channelTelegram.strip()
+        if payload.channelBackupTelegram is not None:
+            gen_data["channelBackupTelegram"] = payload.channelBackupTelegram.strip()
         if payload.backendUrl is not None:
             gen_data["backendUrl"] = payload.backendUrl.strip()
         if payload.marqueeText is not None:

@@ -36,6 +36,7 @@ class Settings:
         self.support_telegram: str = ""
         self.support_telegram2: str = ""
         self.channel_telegram: str = ""
+        self.channel_backup_telegram: str = ""
         self.backend_url: str = ""
 
     async def load_from_db(self, pool_or_conn: Any) -> None:
@@ -83,6 +84,7 @@ class Settings:
             self.support_telegram = str(general.get("supportTelegram") or "").strip()
             self.support_telegram2 = str(general.get("supportTelegram2") or "").strip()
             self.channel_telegram = str(general.get("channelTelegram") or "").strip()
+            self.channel_backup_telegram = str(general.get("channelBackupTelegram") or "").strip()
             self.backend_url = str(general.get("backendUrl") or "").strip()
             logger.info("Configuration dynamique chargée avec succès depuis la BDD.")
         except SystemExit:
