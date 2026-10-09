@@ -1,5 +1,4 @@
-import tempfile
-from pathlib import Path
+import io
 
 import fitz
 
@@ -95,24 +94,16 @@ def defaults(mode: str = "en_ligne", **kwargs) -> dict:
 
 def pdf_bytes(payload: dict | None = None) -> bytes:
     doc = from_payload(payload)
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-        path = Path(tmp.name)
-    try:
-        generate(doc, dest=path)
-        return path.read_bytes()
-    finally:
-        path.unlink(missing_ok=True)
+    buf = io.BytesIO()
+    generate(doc, dest=buf)
+    return buf.getvalue()
 
 
 def pack_pdf_bytes(payload: dict | None = None, count: int = 3) -> bytes:
     docs = generate_payroll_sequence(payload, count=count)
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-        path = Path(tmp.name)
-    try:
-        generate_pack(docs, dest=path)
-        return path.read_bytes()
-    finally:
-        path.unlink(missing_ok=True)
+    buf = io.BytesIO()
+    generate_pack(docs, dest=buf)
+    return buf.getvalue()
 
 
 def png_from_pdf(pdf: bytes, scale: float = 2.0, page_index: int = 0) -> bytes:

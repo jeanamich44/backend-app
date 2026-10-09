@@ -63,10 +63,6 @@ def get_engine_form(category: str, slug: str) -> Optional[dict]:
         else:
             mod_path = f"app.services.generate_docs.{category}.{target_slug}.form"
         mod = importlib.import_module(mod_path)
-        try:
-            mod = importlib.reload(mod)
-        except Exception:
-            pass
         if hasattr(mod, "get_form_schema"):
             schema = mod.get_form_schema()
             title = schema.get("metadata", {}).get("title") or f"{category.upper()} {slug.upper()}"

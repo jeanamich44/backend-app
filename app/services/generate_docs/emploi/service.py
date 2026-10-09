@@ -1,10 +1,7 @@
 import base64
 import io
-from pathlib import Path
-import tempfile
 import zipfile
 import pymupdf as fitz
-from PIL import Image
 
 from app.services.generate_docs.emploi.fiche_de_paie.data import from_payload
 from app.services.generate_docs.emploi.fiche_de_paie.generate import generate
@@ -56,10 +53,8 @@ def generate_fiche_de_paie_preview_pages(payload: dict | None = None) -> list[st
     pages_b64 = []
     for page in doc:
         pix = page.get_pixmap(dpi=150, alpha=False)
-        img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=75)
-        pages_b64.append(base64.b64encode(buf.getvalue()).decode("ascii"))
+        jpg_bytes = pix.tobytes(output="jpeg", jpg_quality=75)
+        pages_b64.append(base64.b64encode(jpg_bytes).decode("ascii"))
     doc.close()
     return pages_b64
 
@@ -95,13 +90,9 @@ def generate_fiche_de_paie_bytes(payload: dict | None = None) -> tuple[bytes, st
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         for idx, doc in enumerate(docs):
-            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-                tmp_path = Path(tmp.name)
-            try:
-                generate(doc, dest=tmp_path)
-                doc_bytes = tmp_path.read_bytes()
-            finally:
-                tmp_path.unlink(missing_ok=True)
+            buf = io.BytesIO()
+            generate(doc, dest=buf)
+            doc_bytes = buf.getvalue()
 
             m = idx + 1
             y = 2026

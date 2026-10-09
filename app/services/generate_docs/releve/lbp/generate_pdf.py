@@ -1657,8 +1657,14 @@ def generate_pdf_doc(data):
 
         if has_ccp_content:
             account_name = data.get("ccp_nom", "Compte Courant Postal")
-            account_num = data.get("ccp_numero") or data.get("ccp_account_num") or data.get("account_num") or "00123456789"
-            iban = data.get("ccp_iban") or data.get("iban") or "FR7620041010010012345678945"
+            account_num = data.get("ccp_numero") or data.get("ccp_account_num") or data.get("account_num")
+            iban = data.get("ccp_iban") or data.get("iban") or "FR7620041010010012345678984"
+            if not account_num:
+                clean_ib = str(iban).replace(" ", "").upper()
+                if clean_ib.startswith("FR") and len(clean_ib) == 27:
+                    account_num = clean_ib[14:25]
+                else:
+                    account_num = "00123456789"
             bic = data.get("ccp_bic") or data.get("bic") or "PSSTFRPPPAR"
             
             if is_block_enabled(data, "show_tx_header_ccp", default=is_master_ccp):

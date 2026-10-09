@@ -71,6 +71,19 @@ def map_request_to_config(req_data: dict) -> dict:
 
     nom_complet = clean_and_format_nom_complet(civ, np_val)
     
+    iban_raw = str(req_data.get("iban") or "").replace(" ", "").upper()
+    acc_raw = str(req_data.get("numero_compte") or "").replace(" ", "").upper()
+    cle_raw = str(req_data.get("cle_compte") or "").replace(" ", "")
+
+    if iban_raw.startswith("FR") and len(iban_raw) == 27:
+        account_num = acc_raw or iban_raw[14:25]
+        cle_compte = cle_raw or iban_raw[25:27]
+        iban_final = iban_raw
+    else:
+        account_num = acc_raw or "00123456789"
+        cle_compte = cle_raw or "84"
+        iban_final = iban_raw or "FR7620041010010012345678984"
+    
     cfg = {
         "bank_type": "lbp",
         "mode": mode,
@@ -89,10 +102,10 @@ def map_request_to_config(req_data: dict) -> dict:
         "centre_financier": req_data.get("centre_financier") or "PARIS CENTRE FINANCIER",
         
         "identifiant": req_data.get("identifiant") or "1455835203",
-        "account_num": req_data.get("numero_compte") or "00123456789",
-        "numero_compte": req_data.get("numero_compte") or "00123456789",
-        "cle_compte": req_data.get("cle_compte") or "45",
-        "iban": req_data.get("iban") or "FR7620041010010012345678945",
+        "account_num": account_num,
+        "numero_compte": account_num,
+        "cle_compte": cle_compte,
+        "iban": iban_final,
         "bic": req_data.get("bic") or "PSSTFRPPPAR",
         "card_number": req_data.get("card_number") or "456",
         "decouvert_autorise": req_data.get("decouvert_autorise") or "300,00",
