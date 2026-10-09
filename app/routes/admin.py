@@ -24,7 +24,7 @@ from app.services.cache import (
     invalidate_service,
     invalidate_active_admins
 )
-from app.services.infrastructure import get_all_infrastructure_metrics
+from app.services.infrastructure import get_all_infrastructure_metrics, get_error_counts
 from app.services.audience import (
     get_audience_overview,
     run_audience_scan,
@@ -313,6 +313,62 @@ async def admin_check(admin: Any = Depends(get_current_admin)):
 
 # =====================================================================
 
+# =====================================================================
+
+def parse_generate_docs_stats(stats_dict: dict) -> dict:
+    total_previews = 0
+    total_generations = 0
+    categories = {
+        "rib": {"label": "RIB & IBAN", "icon": "🏦", "previews": 0, "generations": 0, "items": {}},
+        "facture": {"label": "Factures", "icon": "🧾", "previews": 0, "generations": 0, "items": {}},
+        "emploi": {"label": "Emploi & Salaires", "icon": "💼", "previews": 0, "generations": 0, "items": {}},
+        "releve": {"label": "Relevés Bancaires", "icon": "📑", "previews": 0, "generations": 0, "items": {}},
+        "assurance": {"label": "Assurances", "icon": "🛡️", "previews": 0, "generations": 0, "items": {}},
+        "justificatif": {"label": "Justificatifs de Domicile", "icon": "🏠", "previews": 0, "generations": 0, "items": {}}
+    }
+
+    if isinstance(stats_dict, dict):
+        for key, count in stats_dict.items():
+            parts = key.split(":")
+            if len(parts) < 3:
+                continue
+            cat = parts[0]
+            action = parts[-1]
+            slug = parts[1]
+            period = parts[2] if len(parts) >= 4 else None
+
+            if cat not in categories:
+                categories[cat] = {"label": cat.capitalize(), "icon": "📄", "previews": 0, "generations": 0, "items": {}}
+
+            cnt = int(count or 0)
+            if action == "preview":
+                total_previews += cnt
+                categories[cat]["previews"] += cnt
+            elif action == "generate":
+                total_generations += cnt
+                categories[cat]["generations"] += cnt
+
+            item_key = f"{slug}_{period}" if period else slug
+            if item_key not in categories[cat]["items"]:
+                categories[cat]["items"][item_key] = {"slug": slug, "period": period, "previews": 0, "generations": 0}
+
+            if action == "preview":
+                categories[cat]["items"][item_key]["previews"] += cnt
+            elif action == "generate":
+                categories[cat]["items"][item_key]["generations"] += cnt
+
+    conv_rate = round((total_generations / total_previews * 100), 1) if total_previews > 0 else 0.0
+
+    return {
+        "totalPreviews": total_previews,
+        "totalGenerations": total_generations,
+        "conversionRate": conv_rate,
+        "categories": categories,
+        "raw": stats_dict if isinstance(stats_dict, dict) else {}
+    }
+
+# =====================================================================
+
 @router.get("/stats")
 async def admin_stats(admin: Any = Depends(get_current_admin)):
     if isinstance(admin, Response):
@@ -326,9 +382,33 @@ async def admin_stats(admin: Any = Depends(get_current_admin)):
     total_transactions = 0
     total_sales_vol = 0.0
     gen_count = 0
+    gen_revenue = 0.0
+    sumup_sent = 0
+    sumup_received = 0
+    oxapay_sent = 0
+    oxapay_received = 0
+    amendes_count = 0
+    bot_logs_count = 0
     recent_sales = []
     recent_payments = []
     maintenance_mode = False
+    gd_stats_raw = {}
+
+    today_graph_slots = [{"label": f"{h:02d}h-{(h+2):02d}h", "volume": 0} for h in range(0, 24, 2)]
+    days7_graph_slots = []
+    days30_graph_slots = []
+
+    now_utc = datetime.now(timezone.utc)
+    for i in range(6, -1, -1):
+        d = (now_utc - timedelta(days=i)).date()
+        days7_graph_slots.append({"label": d.strftime("%d/%m"), "key": str(d), "volume": 0})
+
+    for i in range(29, -1, -1):
+        d = (now_utc - timedelta(days=i)).date()
+        days30_graph_slots.append({"label": d.strftime("%d/%m"), "key": str(d), "volume": 0})
+
+    days7_map = {item["key"]: item for item in days7_graph_slots}
+    days30_map = {item["key"]: item for item in days30_graph_slots}
 
     async with pool.acquire() as conn:
         try:
@@ -342,6 +422,23 @@ async def admin_stats(admin: Any = Depends(get_current_admin)):
             if p_row:
                 total_payments = int(p_row[0] or 0)
                 total_payments_vol = float(p_row[1] or 0.0)
+        except Exception:
+            pass
+
+        try:
+            p_stats = await conn.fetchrow("""
+                SELECT 
+                    COUNT(CASE WHEN checkout_id IS NOT NULL THEN 1 END) as sumup_sent,
+                    COUNT(CASE WHEN checkout_id IS NOT NULL AND status = 'PAID' THEN 1 END) as sumup_rec,
+                    COUNT(CASE WHEN (currency = 'USDT' OR checkout_reference LIKE 'OXA%' OR checkout_id LIKE 'oxa_%' OR (sumup_payload IS NOT NULL AND sumup_payload->>'provider' = 'oxapay')) THEN 1 END) as oxa_sent,
+                    COUNT(CASE WHEN (currency = 'USDT' OR checkout_reference LIKE 'OXA%' OR checkout_id LIKE 'oxa_%' OR (sumup_payload IS NOT NULL AND sumup_payload->>'provider' = 'oxapay')) AND status = 'PAID' THEN 1 END) as oxa_rec
+                FROM payments
+            """)
+            if p_stats:
+                sumup_sent = int(p_stats["sumup_sent"] or 0)
+                sumup_received = int(p_stats["sumup_rec"] or 0)
+                oxapay_sent = int(p_stats["oxa_sent"] or 0)
+                oxapay_received = int(p_stats["oxa_rec"] or 0)
         except Exception:
             pass
 
@@ -360,8 +457,33 @@ async def admin_stats(admin: Any = Depends(get_current_admin)):
             pass
 
         try:
-            g_row = await conn.fetchval("SELECT COUNT(*) FROM generations")
-            gen_count = int(g_row or 0)
+            g_row = await conn.fetchrow("SELECT COUNT(*), COALESCE(SUM(cost), 0) FROM generations")
+            if g_row:
+                gen_count = int(g_row[0] or 0)
+                gen_revenue = float(g_row[1] or 0.0)
+        except Exception:
+            pass
+
+        try:
+            a_cnt = await conn.fetchval("SELECT COUNT(*) FROM amendes")
+            amendes_count = int(a_cnt or 0)
+        except Exception:
+            pass
+
+        try:
+            b_cnt = await conn.fetchval("SELECT COUNT(*) FROM bot_logs")
+            bot_logs_count = int(b_cnt or 0)
+        except Exception:
+            pass
+
+        try:
+            gd_row = await conn.fetchrow("SELECT config FROM services WHERE slug = 'generate-docs'")
+            if gd_row and gd_row["config"]:
+                raw_c = gd_row["config"]
+                while isinstance(raw_c, str):
+                    raw_c = json.loads(raw_c)
+                if isinstance(raw_c, dict):
+                    gd_stats_raw = raw_c.get("stats", {})
         except Exception:
             pass
 
@@ -404,25 +526,102 @@ async def admin_stats(admin: Any = Depends(get_current_admin)):
         except Exception:
             pass
 
+        try:
+            today_hourly_rows = await conn.fetch("""
+                SELECT EXTRACT(HOUR FROM created_at) as hr, COUNT(*) as cnt
+                FROM (
+                    SELECT created_at FROM transactions WHERE created_at >= CURRENT_DATE
+                    UNION ALL
+                    SELECT created_at FROM payments WHERE created_at >= CURRENT_DATE
+                    UNION ALL
+                    SELECT created_at FROM generations WHERE created_at >= CURRENT_DATE
+                    UNION ALL
+                    SELECT created_at FROM users WHERE created_at >= CURRENT_DATE
+                    UNION ALL
+                    SELECT created_at FROM bot_logs WHERE created_at >= CURRENT_DATE
+                ) all_act
+                GROUP BY hr
+            """)
+            for r in today_hourly_rows:
+                hr = int(r["hr"] or 0)
+                idx = min(11, max(0, hr // 2))
+                today_graph_slots[idx]["volume"] += int(r["cnt"] or 0)
+        except Exception:
+            pass
+
+        try:
+            past_days_rows = await conn.fetch("""
+                SELECT DATE(created_at) as dt, COUNT(*) as cnt
+                FROM (
+                    SELECT created_at FROM transactions WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+                    UNION ALL
+                    SELECT created_at FROM payments WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+                    UNION ALL
+                    SELECT created_at FROM generations WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+                    UNION ALL
+                    SELECT created_at FROM users WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+                    UNION ALL
+                    SELECT created_at FROM bot_logs WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+                ) all_act
+                GROUP BY dt
+            """)
+            for r in past_days_rows:
+                k = str(r["dt"])
+                cnt = int(r["cnt"] or 0)
+                if k in days7_map:
+                    days7_map[k]["volume"] = cnt
+                if k in days30_map:
+                    days30_map[k]["volume"] = cnt
+        except Exception:
+            pass
+
     total_ca = total_payments_vol if total_payments_vol > 0 else total_sales_vol
     total_sales = total_transactions if total_transactions > 0 else total_payments
 
+    gd_data = parse_generate_docs_stats(gd_stats_raw)
+    total_doc_generations = max(gen_count, gd_data["totalGenerations"])
+    gd_data["totalGenerations"] = total_doc_generations
+    if gd_data["totalPreviews"] > 0:
+        gd_data["conversionRate"] = round((total_doc_generations / gd_data["totalPreviews"] * 100), 1)
+
+    commands_executed = total_transactions + total_doc_generations + amendes_count + bot_logs_count
+    telegram_received = bot_logs_count + total_users
+    telegram_sent = bot_logs_count + total_transactions + total_doc_generations + amendes_count
+
+    errors_count = get_error_counts()
+
     metrics = {
-        "telegramReceived": 0,
-        "telegramSent": 0,
-        "sumupReceived": total_payments,
-        "sumupSent": 0,
-        "oxapayReceived": 0,
-        "oxapaySent": 0,
-        "commandsExecuted": 0,
-        "errorsCount": 0,
+        "telegramReceived": telegram_received,
+        "telegramSent": telegram_sent,
+        "sumupReceived": sumup_received,
+        "sumupSent": sumup_sent,
+        "oxapayReceived": oxapay_received,
+        "oxapaySent": oxapay_sent,
+        "commandsExecuted": commands_executed,
+        "documentPreviews": gd_data["totalPreviews"],
+        "documentGenerations": total_doc_generations,
+        "documentConversionRate": gd_data["conversionRate"],
+        "documentRevenue": gen_revenue,
+        "errorsCount": errors_count,
         "adminLogins": 1
     }
 
+    total_traffic = (
+        telegram_received + telegram_sent +
+        sumup_received + sumup_sent +
+        oxapay_received + oxapay_sent +
+        commands_executed +
+        gd_data["totalPreviews"] + total_doc_generations +
+        errors_count + 1
+    )
+
+    clean_days7 = [{"label": item["label"], "volume": item["volume"]} for item in days7_graph_slots]
+    clean_days30 = [{"label": item["label"], "volume": item["volume"]} for item in days30_graph_slots]
+
     graph = {
-        "today": [{"label": f"{h:02d}h-{(h+2):02d}h", "volume": 0} for h in range(0, 24, 2)],
-        "days7": [{"label": f"J-{i}", "volume": 0} for i in range(6, -1, -1)],
-        "days30": [{"label": f"J-{i}", "volume": 0} for i in range(29, -1, -1)]
+        "today": today_graph_slots,
+        "days7": clean_days7,
+        "days30": clean_days30
     }
 
     return {
@@ -434,15 +633,19 @@ async def admin_stats(admin: Any = Depends(get_current_admin)):
         "recentPayments": recent_payments,
         "maintenance": maintenance_mode,
         "metrics": metrics,
+        "totalTraffic": total_traffic,
+        "generateDocs": gd_data,
         "graph": graph,
         "users_count": int(total_users),
         "payments_count": int(total_sales),
         "payments_volume": float(total_ca),
         "stock_count": int(total_stock),
-        "generations_count": int(gen_count),
+        "generations_count": int(total_doc_generations),
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "version": get_git_info()
     }
+
+# =====================================================================
 
 # =====================================================================
 
@@ -628,6 +831,21 @@ async def admin_sync_user(payload: UserSyncPayload, admin: Any = Depends(get_cur
 async def admin_reset_metrics(admin: Any = Depends(get_current_admin)):
     if isinstance(admin, Response):
         return admin
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        try:
+            await conn.execute("""
+                UPDATE services 
+                SET config = jsonb_set(
+                    CASE WHEN config IS NULL THEN '{}'::jsonb ELSE config END,
+                    '{stats}',
+                    '{}'::jsonb,
+                    true
+                )
+                WHERE slug = 'generate-docs'
+            """)
+        except Exception:
+            pass
     return {"success": True}
 
 # =====================================================================

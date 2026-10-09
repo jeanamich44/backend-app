@@ -33,6 +33,11 @@ def record_http_request(status_code: int, duration_ms: float) -> None:
 
 # =====================================================================
 
+def get_error_counts() -> int:
+    return _STATUS_4XX + _STATUS_5XX
+
+# =====================================================================
+
 def _format_duration(seconds: float) -> str:
     secs = int(seconds)
     days = secs // 86400
