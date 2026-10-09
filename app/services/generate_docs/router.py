@@ -225,6 +225,7 @@ async def rib_pricing():
 async def rib_preview(
     bank: str,
     req: RibGenerateRequest,
+    x_telegram_init_data: Optional[str] = Header(None, alias="X-Telegram-Init-Data"),
     x_auth_role: Optional[str] = Header(None, alias="X-Auth-Role"),
 ):
     if bank not in BANKS:
@@ -233,7 +234,7 @@ async def rib_preview(
         await _guard_document_access("rib", bank, x_auth_role, is_preview=True)
         jpg_bytes = await asyncio.to_thread(generate_preview_jpg_bytes, bank, _dump(req))
         db_pool = await get_pool()
-        dispatch_stat(db_pool, category="rib", slug=bank, action="preview")
+        dispatch_stat(db_pool, category="rib", slug=bank, action="preview", init_data=x_telegram_init_data)
         return Response(
             content=jpg_bytes,
             media_type="image/jpeg",
@@ -284,7 +285,7 @@ async def rib_generate(
         charged = True
 
         pdf_bytes = await asyncio.to_thread(generate_pdf_bytes, bank, data)
-        dispatch_stat(db_pool, category="rib", slug=bank, action="generate")
+        dispatch_stat(db_pool, category="rib", slug=bank, action="generate", init_data=x_telegram_init_data, email=x_user_email)
         output_bytes = await _process_generated_output(pdf_bytes, "application/pdf", db_pool)
         return Response(
             content=output_bytes,
@@ -336,6 +337,7 @@ async def releve_pricing():
 async def releve_preview(
     bank: str,
     req: ReleveLBPGenerateRequest,
+    x_telegram_init_data: Optional[str] = Header(None, alias="X-Telegram-Init-Data"),
     x_auth_role: Optional[str] = Header(None, alias="X-Auth-Role"),
 ):
     if bank != "lbp":
@@ -345,7 +347,7 @@ async def releve_preview(
         duree = req.duree_mois if req.duree_mois in VALID_RELEVE_DURATIONS else 1
         pdf_bytes = await asyncio.to_thread(generate_lbp_preview_pdf_bytes, _dump(req))
         db_pool = await get_pool()
-        dispatch_stat(db_pool, category="releve", slug=bank, action="preview", period=f"{duree}m")
+        dispatch_stat(db_pool, category="releve", slug=bank, action="preview", period=f"{duree}m", init_data=x_telegram_init_data)
         return Response(
             content=pdf_bytes,
             media_type="application/pdf",
@@ -386,7 +388,7 @@ async def releve_generate(
     )
     try:
         file_bytes, content_type, filename = await asyncio.to_thread(generate_lbp_releves_bytes, _dump(req))
-        dispatch_stat(pool, category="releve", slug=bank, action="generate", period=f"{duree}m")
+        dispatch_stat(pool, category="releve", slug=bank, action="generate", period=f"{duree}m", init_data=x_telegram_init_data, email=x_user_email)
         output_bytes = await _process_generated_output(file_bytes, content_type, pool)
         return Response(
             content=output_bytes,
@@ -431,6 +433,7 @@ async def emploi_pricing():
 async def emploi_preview(
     issuer: str,
     req: FicheDePaieGenerateRequest,
+    x_telegram_init_data: Optional[str] = Header(None, alias="X-Telegram-Init-Data"),
     x_auth_role: Optional[str] = Header(None, alias="X-Auth-Role"),
 ):
     if issuer != "fiche_de_paie":
@@ -440,7 +443,7 @@ async def emploi_preview(
         duree = req.duree_mois if req.duree_mois in VALID_EMPLOI_DURATIONS else 1
         pages_b64 = await asyncio.to_thread(generate_fiche_de_paie_preview_pages, _dump(req))
         db_pool = await get_pool()
-        dispatch_stat(db_pool, category="emploi", slug=issuer, action="preview", period=f"{duree}m")
+        dispatch_stat(db_pool, category="emploi", slug=issuer, action="preview", period=f"{duree}m", init_data=x_telegram_init_data)
         return {"pages": pages_b64}
     except HTTPException:
         raise
@@ -474,7 +477,7 @@ async def emploi_generate(
     )
     try:
         file_bytes, content_type, filename = await asyncio.to_thread(generate_fiche_de_paie_bytes, _dump(req))
-        dispatch_stat(pool, category="emploi", slug=issuer, action="generate", period=f"{duree}m")
+        dispatch_stat(pool, category="emploi", slug=issuer, action="generate", period=f"{duree}m", init_data=x_telegram_init_data, email=x_user_email)
         output_bytes = await _process_generated_output(file_bytes, content_type, pool)
         return Response(
             content=output_bytes,
@@ -500,6 +503,7 @@ async def emploi_generate(
 async def assurance_preview(
     issuer: str,
     req: AssuranceMaxanceGenerateRequest,
+    x_telegram_init_data: Optional[str] = Header(None, alias="X-Telegram-Init-Data"),
     x_auth_role: Optional[str] = Header(None, alias="X-Auth-Role"),
 ):
     if issuer not in ISSUERS:
@@ -508,7 +512,7 @@ async def assurance_preview(
         await _guard_document_access("assurance", issuer, x_auth_role, is_preview=True)
         jpg_bytes = await asyncio.to_thread(generate_assurance_preview_jpg_bytes, issuer, _dump(req))
         db_pool = await get_pool()
-        dispatch_stat(db_pool, category="assurance", slug=issuer, action="preview")
+        dispatch_stat(db_pool, category="assurance", slug=issuer, action="preview", init_data=x_telegram_init_data)
         return Response(
             content=jpg_bytes,
             media_type="image/jpeg",
@@ -556,7 +560,7 @@ async def assurance_generate(
         )
         charged = True
         pdf_bytes = await asyncio.to_thread(generate_assurance_pdf_bytes, issuer, data)
-        dispatch_stat(db_pool, category="assurance", slug=issuer, action="generate")
+        dispatch_stat(db_pool, category="assurance", slug=issuer, action="generate", init_data=x_telegram_init_data, email=x_user_email)
         output_bytes = await _process_generated_output(pdf_bytes, "application/pdf", db_pool)
         immat = data.get("immatriculation") or data.get("vehicule_immat") or "DOC"
         return Response(
@@ -619,6 +623,7 @@ async def facture_pricing():
 async def facture_preview(
     issuer: str,
     req: FactureGenerateRequest,
+    x_telegram_init_data: Optional[str] = Header(None, alias="X-Telegram-Init-Data"),
     x_auth_role: Optional[str] = Header(None, alias="X-Auth-Role"),
 ):
     if issuer not in FACTURE_ISSUERS:
@@ -627,7 +632,7 @@ async def facture_preview(
         await _guard_document_access("facture", issuer, x_auth_role, is_preview=True)
         jpg_bytes = await asyncio.to_thread(generate_facture_preview_jpg_bytes, issuer, _dump(req))
         db_pool = await get_pool()
-        dispatch_stat(db_pool, category="facture", slug=issuer, action="preview")
+        dispatch_stat(db_pool, category="facture", slug=issuer, action="preview", init_data=x_telegram_init_data)
         return Response(
             content=jpg_bytes,
             media_type="image/jpeg",
@@ -676,7 +681,7 @@ async def facture_generate(
         )
         charged = True
         pdf_bytes = await asyncio.to_thread(generate_facture_pdf_bytes, issuer, data)
-        dispatch_stat(db_pool, category="facture", slug=issuer, action="generate")
+        dispatch_stat(db_pool, category="facture", slug=issuer, action="generate", init_data=x_telegram_init_data, email=x_user_email)
         output_bytes = await _process_generated_output(pdf_bytes, "application/pdf", db_pool)
         return Response(
             content=output_bytes,
@@ -730,6 +735,7 @@ async def justificatif_pricing():
 async def justificatif_preview(
     issuer: str,
     req: JustificatifGenerateRequest,
+    x_telegram_init_data: Optional[str] = Header(None, alias="X-Telegram-Init-Data"),
     x_auth_role: Optional[str] = Header(None, alias="X-Auth-Role"),
 ):
     if issuer not in JUSTIFICATIF_ISSUERS:
@@ -738,7 +744,7 @@ async def justificatif_preview(
         await _guard_document_access("justificatif", issuer, x_auth_role, is_preview=True)
         jpg_bytes = await asyncio.to_thread(generate_justificatif_preview_jpg_bytes, issuer, _dump(req))
         db_pool = await get_pool()
-        dispatch_stat(db_pool, category="justificatif", slug=issuer, action="preview")
+        dispatch_stat(db_pool, category="justificatif", slug=issuer, action="preview", init_data=x_telegram_init_data)
         return Response(
             content=jpg_bytes,
             media_type="image/jpeg",
@@ -787,7 +793,7 @@ async def justificatif_generate(
         )
         charged = True
         pdf_bytes = await asyncio.to_thread(generate_justificatif_pdf_bytes, issuer, data)
-        dispatch_stat(db_pool, category="justificatif", slug=issuer, action="generate")
+        dispatch_stat(db_pool, category="justificatif", slug=issuer, action="generate", init_data=x_telegram_init_data, email=x_user_email)
         output_bytes = await _process_generated_output(pdf_bytes, "application/pdf", db_pool)
         return Response(
             content=output_bytes,
