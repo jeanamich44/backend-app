@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional, Tuple
 from fastapi import HTTPException
 from app.db import get_db_pool
 from app.services.cache import get_cached_settings
+from app.services.telegram import dispatch_admin_notification
 
 # =====================================================================
 
@@ -224,6 +225,15 @@ async def create_checkout(
                 json.dumps({"bank": selected_bank, "created_at": time.time(), "expiration_minutes": exp_minutes}),
             )
 
+        dispatch_admin_notification(
+            f"💳 <b>Nouvelle Recharge Créée</b>\n\n"
+            f"👤 <b>Client ID</b> : <code>{user_id}</code>\n"
+            f"💰 <b>Montant</b> : {round(float(amount), 2):.2f} €\n"
+            f"🏦 <b>Banque</b> : {selected_bank.upper()}\n"
+            f"🆔 <b>Checkout ID</b> : <code>{checkout_id}</code>\n"
+            f"⏳ <b>Statut</b> : En attente de paiement"
+        )
+
         return {
             "checkout_id": checkout_id,
             "payment_url": f"{SUMUP_CHECKOUT_PREFIX}{checkout_id}",
@@ -338,6 +348,13 @@ async def verify_checkout(
                     )
                     new_balance = float(user_upd["balance"]) if user_upd else 0.0
                     print(f"[RENDER SUMUP CRÉDIT EFFECTUÉ] User {payer_id} crédité de +{amount}€ (Solde={new_balance}€)", flush=True)
+                    dispatch_admin_notification(
+                        f"✅ <b>Recharge Validée & Créditée !</b>\n\n"
+                        f"👤 <b>Client ID</b> : <code>{payer_id}</code>\n"
+                        f"💰 <b>Montant crédité</b> : +{amount:.2f} €\n"
+                        f"💳 <b>Nouveau solde</b> : {new_balance:.2f} €\n"
+                        f"🆔 <b>Checkout ID</b> : <code>{checkout_id}</code>"
+                    )
                 else:
                     user_row = await conn.fetchrow("SELECT balance FROM users WHERE id = $1", payer_id)
                     new_balance = float(user_row["balance"]) if user_row else 0.0
@@ -360,6 +377,12 @@ async def verify_checkout(
                 json.dumps(sumup_data),
                 checkout_id
             )
+        dispatch_admin_notification(
+            f"⚠️ <b>Recharge Échouée / Refusée</b>\n\n"
+            f"👤 <b>Client ID</b> : <code>{payer_id}</code>\n"
+            f"💰 <b>Montant</b> : {amount:.2f} €\n"
+            f"🆔 <b>Checkout ID</b> : <code>{checkout_id}</code>"
+        )
         return {
             "checkout_id": checkout_id,
             "status": "FAILED",
@@ -377,6 +400,12 @@ async def verify_checkout(
                 json.dumps(sumup_data),
                 checkout_id
             )
+        dispatch_admin_notification(
+            f"❌ <b>Recharge Annulée</b>\n\n"
+            f"👤 <b>Client ID</b> : <code>{payer_id}</code>\n"
+            f"💰 <b>Montant</b> : {amount:.2f} €\n"
+            f"🆔 <b>Checkout ID</b> : <code>{checkout_id}</code>"
+        )
         return {
             "checkout_id": checkout_id,
             "status": "CANCELLED",
@@ -394,6 +423,12 @@ async def verify_checkout(
                 json.dumps(sumup_data),
                 checkout_id
             )
+        dispatch_admin_notification(
+            f"⌛ <b>Recharge Expirée</b>\n\n"
+            f"👤 <b>Client ID</b> : <code>{payer_id}</code>\n"
+            f"💰 <b>Montant</b> : {amount:.2f} €\n"
+            f"🆔 <b>Checkout ID</b> : <code>{checkout_id}</code>"
+        )
         return {
             "checkout_id": checkout_id,
             "status": "EXPIRED",
@@ -503,6 +538,12 @@ async def cancel_checkout(user_id: int) -> Dict[str, Any]:
             checkout_id
         )
         print(f"[RENDER SUMUP CANCEL SUCCÈS] Facture {checkout_id} marquée CANCELLED pour user {user_id}", flush=True)
+
+    dispatch_admin_notification(
+        f"❌ <b>Recharge Annulée par le Client</b>\n\n"
+        f"👤 <b>Client ID</b> : <code>{user_id}</code>\n"
+        f"🆔 <b>Checkout ID</b> : <code>{checkout_id}</code>"
+    )
 
     return {
         "success": True,

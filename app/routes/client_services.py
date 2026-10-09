@@ -16,6 +16,7 @@ from app.auth import get_current_user
 from app.db import get_db_pool
 from app.services.iptv_panel import generate_demo_iptv_line
 from app.services.cache import get_cached_service
+from app.services.telegram import dispatch_admin_notification
 
 # =====================================================================
 
@@ -407,6 +408,16 @@ async def buy_iptv_subscription(
                 VALUES ($1, 'iptv', $2, $3, $4, $5, $6, NOW())
             """, user_id, username or "Abonnement", password or "Actif", payload.sub, price, extracted_url or "")
 
+    client_display = f"@{user['username']}" if user.get("username") else f"{user.get('first_name', '')} (<code>{user_id}</code>)"
+    dispatch_admin_notification(
+        f"📺 <b>Nouvel Achat IPTV — Abonnement</b>\n\n"
+        f"👤 <b>Client</b> : {client_display}\n"
+        f"⏱ <b>Formule</b> : {payload.sub}\n"
+        f"💰 <b>Montant</b> : {price:.2f} €\n"
+        f"🔑 <b>Identifiant</b> : <code>{username}</code>\n"
+        f"💳 <b>Nouveau solde</b> : {new_balance:.2f} €"
+    )
+
     return {
         "success": True,
         "username": username,
@@ -508,6 +519,17 @@ async def buy_iptv_demo(user: Dict[str, Any] = Depends(get_current_user)):
                 VALUES ($1, 'iptv', $2, $3, 0, $4, $5, NOW())
             """, user_id, username, password, demo_price, extracted_url or "")
             new_bal_row = await conn.fetchval("SELECT balance FROM users WHERE id = $1", user_id)
+
+    client_display = f"@{user['username']}" if user.get("username") else f"{user.get('first_name', '')} (<code>{user_id}</code>)"
+    new_bal = float(new_bal_row or 0)
+    dispatch_admin_notification(
+        f"📺 <b>Nouvel Achat IPTV — Test Démo</b>\n\n"
+        f"👤 <b>Client</b> : {client_display}\n"
+        f"⏱ <b>Durée</b> : 24h\n"
+        f"💰 <b>Montant</b> : {demo_price:.2f} €\n"
+        f"🔑 <b>Identifiant</b> : <code>{username}</code>\n"
+        f"💳 <b>Nouveau solde</b> : {new_bal:.2f} €"
+    )
 
     return {
         "success": True,

@@ -1,8 +1,10 @@
+import asyncio
 import json
 import logging
 from typing import Optional, Dict, Any, List, Tuple
 import httpx
 from app.config import settings
+from app.services.cache import get_cached_active_admins
 
 # =====================================================================
 
@@ -49,6 +51,32 @@ async def send_telegram_message(
     except Exception as e:
         logger.error(f"Exception Telegram sendMessage: {e}")
         return None
+
+# =====================================================================
+
+async def notify_admins(text: str) -> None:
+    try:
+        admin_rows = await get_cached_active_admins()
+        if not admin_rows:
+            return
+        for r in admin_rows:
+            aid = r.get("id")
+            if aid:
+                try:
+                    await send_telegram_message(chat_id=aid, text=text)
+                except Exception:
+                    pass
+    except Exception as e:
+        logger.error(f"Erreur notify_admins: {e}")
+
+# =====================================================================
+
+def dispatch_admin_notification(text: str) -> None:
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(notify_admins(text))
+    except RuntimeError:
+        pass
 
 # =====================================================================
 

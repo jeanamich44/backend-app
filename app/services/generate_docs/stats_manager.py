@@ -1,4 +1,22 @@
 import asyncio
+from app.services.telegram import dispatch_admin_notification
+
+# --------------------------------------------------------------------------
+def format_doc_title(category: str, slug: str, period: str = "default") -> str:
+    dur_str = f" ({period.replace('m', ' mois')})" if period and period != "default" else ""
+    if category == "rib":
+        return f"RIB {slug.upper()}"
+    if category == "emploi":
+        return f"Bulletin de Paie{dur_str}"
+    if category == "releve":
+        return f"Relevé Bancaire {slug.upper()}{dur_str}"
+    if category == "assurance":
+        return f"Attestation Assurance {slug.upper()}"
+    if category == "facture":
+        return f"Facture {slug.replace('_', ' ').capitalize()}"
+    if category == "justificatif":
+        return f"Justificatif {slug.replace('_', ' ').capitalize()}"
+    return f"{category.capitalize()} - {slug}{dur_str}"
 
 # --------------------------------------------------------------------------
 def dispatch_stat(
@@ -13,6 +31,19 @@ def dispatch_stat(
     try:
         loop = asyncio.get_running_loop()
         loop.create_task(record_stat(pool, category, slug, action, period))
+        doc_title = format_doc_title(category, slug, period)
+        if action == "preview":
+            dispatch_admin_notification(
+                f"👁 <b>Aperçu Document</b>\n\n"
+                f"📄 <b>Document</b> : {doc_title}\n"
+                f"📁 <b>Catégorie</b> : {category.upper()}"
+            )
+        elif action == "generate":
+            dispatch_admin_notification(
+                f"📄 <b>Nouveau Document Acheté</b>\n\n"
+                f"📄 <b>Document</b> : {doc_title}\n"
+                f"📁 <b>Catégorie</b> : {category.upper()}"
+            )
     except RuntimeError:
         pass
 
