@@ -7,6 +7,7 @@ import hmac
 import hashlib
 import secrets
 import logging
+import zoneinfo
 import httpx
 from uuid import UUID
 from decimal import Decimal
@@ -406,17 +407,34 @@ async def admin_stats(admin: Any = Depends(get_current_admin)):
     maintenance_mode = False
     gd_stats_raw = {}
 
-    today_graph_slots = [{"label": f"{h:02d}h-{(h+2):02d}h", "volume": 0} for h in range(0, 24, 2)]
-    days7_graph_slots = []
-    days30_graph_slots = []
+    try:
+        tz_paris = zoneinfo.ZoneInfo("Europe/Paris")
+    except Exception:
+        tz_paris = timezone(timedelta(hours=2))
 
-    now_utc = datetime.now(timezone.utc)
+    now_paris = datetime.now(tz_paris)
+
+    hours24_graph_slots = []
+    for i in range(23, -1, -1):
+        dt_slot = now_paris - timedelta(hours=i)
+        key = dt_slot.strftime("%Y-%m-%d %H")
+        label = dt_slot.strftime("%Hh")
+        hours24_graph_slots.append({"key": key, "label": label, "volume": 0})
+    hours24_map = {item["key"]: item for item in hours24_graph_slots}
+
+    today_graph_slots = []
+    for h in range(0, now_paris.hour + 1):
+        today_graph_slots.append({"key": h, "label": f"{h:02d}h", "volume": 0})
+    today_map = {item["key"]: item for item in today_graph_slots}
+
+    days7_graph_slots = []
     for i in range(6, -1, -1):
-        d = (now_utc - timedelta(days=i)).date()
+        d = (now_paris - timedelta(days=i)).date()
         days7_graph_slots.append({"label": d.strftime("%d/%m"), "key": str(d), "volume": 0})
 
+    days30_graph_slots = []
     for i in range(29, -1, -1):
-        d = (now_utc - timedelta(days=i)).date()
+        d = (now_paris - timedelta(days=i)).date()
         days30_graph_slots.append({"label": d.strftime("%d/%m"), "key": str(d), "volume": 0})
 
     days7_map = {item["key"]: item for item in days7_graph_slots}
@@ -539,46 +557,75 @@ async def admin_stats(admin: Any = Depends(get_current_admin)):
             pass
 
         try:
-            today_hourly_rows = await conn.fetch("""
-                SELECT EXTRACT(HOUR FROM created_at) as hr, COUNT(*) as cnt
+            h24_rows = await conn.fetch("""
+                SELECT 
+                    TO_CHAR(created_at AT TIME ZONE 'Europe/Paris', 'YYYY-MM-DD HH24') as hr_key,
+                    COUNT(*) as cnt
                 FROM (
-                    SELECT created_at FROM transactions WHERE created_at >= CURRENT_DATE
+                    SELECT created_at FROM transactions WHERE created_at >= NOW() - INTERVAL '25 hours'
                     UNION ALL
-                    SELECT created_at FROM payments WHERE created_at >= CURRENT_DATE
+                    SELECT created_at FROM payments WHERE created_at >= NOW() - INTERVAL '25 hours'
                     UNION ALL
-                    SELECT created_at FROM generations WHERE created_at >= CURRENT_DATE
+                    SELECT created_at FROM generations WHERE created_at >= NOW() - INTERVAL '25 hours'
                     UNION ALL
-                    SELECT created_at FROM users WHERE created_at >= CURRENT_DATE
+                    SELECT created_at FROM users WHERE created_at >= NOW() - INTERVAL '25 hours'
                     UNION ALL
-                    SELECT created_at FROM bot_logs WHERE created_at >= CURRENT_DATE
+                    SELECT created_at FROM bot_logs WHERE created_at >= NOW() - INTERVAL '25 hours'
+                ) all_act
+                GROUP BY hr_key
+            """)
+            for r in h24_rows:
+                k = str(r["hr_key"] or "").strip()
+                if k in hours24_map:
+                    hours24_map[k]["volume"] += int(r["cnt"] or 0)
+        except Exception:
+            pass
+
+        try:
+            today_rows = await conn.fetch("""
+                SELECT 
+                    EXTRACT(HOUR FROM created_at AT TIME ZONE 'Europe/Paris') as hr,
+                    COUNT(*) as cnt
+                FROM (
+                    SELECT created_at FROM transactions WHERE (created_at AT TIME ZONE 'Europe/Paris')::date = (NOW() AT TIME ZONE 'Europe/Paris')::date
+                    UNION ALL
+                    SELECT created_at FROM payments WHERE (created_at AT TIME ZONE 'Europe/Paris')::date = (NOW() AT TIME ZONE 'Europe/Paris')::date
+                    UNION ALL
+                    SELECT created_at FROM generations WHERE (created_at AT TIME ZONE 'Europe/Paris')::date = (NOW() AT TIME ZONE 'Europe/Paris')::date
+                    UNION ALL
+                    SELECT created_at FROM users WHERE (created_at AT TIME ZONE 'Europe/Paris')::date = (NOW() AT TIME ZONE 'Europe/Paris')::date
+                    UNION ALL
+                    SELECT created_at FROM bot_logs WHERE (created_at AT TIME ZONE 'Europe/Paris')::date = (NOW() AT TIME ZONE 'Europe/Paris')::date
                 ) all_act
                 GROUP BY hr
             """)
-            for r in today_hourly_rows:
+            for r in today_rows:
                 hr = int(r["hr"] or 0)
-                idx = min(11, max(0, hr // 2))
-                today_graph_slots[idx]["volume"] += int(r["cnt"] or 0)
+                if hr in today_map:
+                    today_map[hr]["volume"] += int(r["cnt"] or 0)
         except Exception:
             pass
 
         try:
             past_days_rows = await conn.fetch("""
-                SELECT DATE(created_at) as dt, COUNT(*) as cnt
+                SELECT 
+                    TO_CHAR(created_at AT TIME ZONE 'Europe/Paris', 'YYYY-MM-DD') as dt,
+                    COUNT(*) as cnt
                 FROM (
-                    SELECT created_at FROM transactions WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+                    SELECT created_at FROM transactions WHERE created_at >= NOW() - INTERVAL '31 days'
                     UNION ALL
-                    SELECT created_at FROM payments WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+                    SELECT created_at FROM payments WHERE created_at >= NOW() - INTERVAL '31 days'
                     UNION ALL
-                    SELECT created_at FROM generations WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+                    SELECT created_at FROM generations WHERE created_at >= NOW() - INTERVAL '31 days'
                     UNION ALL
-                    SELECT created_at FROM users WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+                    SELECT created_at FROM users WHERE created_at >= NOW() - INTERVAL '31 days'
                     UNION ALL
-                    SELECT created_at FROM bot_logs WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+                    SELECT created_at FROM bot_logs WHERE created_at >= NOW() - INTERVAL '31 days'
                 ) all_act
                 GROUP BY dt
             """)
             for r in past_days_rows:
-                k = str(r["dt"])
+                k = str(r["dt"] or "").strip()
                 cnt = int(r["cnt"] or 0)
                 if k in days7_map:
                     days7_map[k]["volume"] = cnt
@@ -627,6 +674,8 @@ async def admin_stats(admin: Any = Depends(get_current_admin)):
         errors_count + 1
     )
 
+    clean_hours24 = [{"label": item["label"], "volume": item["volume"]} for item in hours24_graph_slots]
+    clean_today = [{"label": item["label"], "volume": item["volume"]} for item in today_graph_slots]
     clean_days7 = [{"label": item["label"], "volume": item["volume"]} for item in days7_graph_slots]
     clean_days30 = [{"label": item["label"], "volume": item["volume"]} for item in days30_graph_slots]
 
@@ -638,7 +687,8 @@ async def admin_stats(admin: Any = Depends(get_current_admin)):
     }
 
     graph = {
-        "today": today_graph_slots,
+        "hours24": clean_hours24,
+        "today": clean_today,
         "days7": clean_days7,
         "days30": clean_days30
     }
