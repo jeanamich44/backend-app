@@ -139,7 +139,7 @@ async def get_cached_active_admins() -> List[Dict[str, Any]]:
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT id, username, first_name FROM users WHERE admin = TRUE AND is_banned = FALSE")
         data = [{"id": r["id"], "username": r["username"], "first_name": r["first_name"]} for r in rows]
-        set(cache_key, data, ttl=300)
+        set(cache_key, data, ttl=30)
         return data
 
 # =====================================================================

@@ -83,6 +83,7 @@ async def upsert_telegram_user(user_data: Dict[str, Any]) -> Dict[str, Any]:
             "balance": float(row["balance"]),
             "is_banned": row["is_banned"],
             "admin": bool(row["admin"]),
+            "photo_url": user_data.get("photo_url"),
             "created_at": row["created_at"].isoformat() if row["created_at"] else None,
             "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None
         }

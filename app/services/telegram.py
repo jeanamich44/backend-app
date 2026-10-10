@@ -214,6 +214,22 @@ async def send_telegram_media_group(
     url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMediaGroup"
 
     if file_ids:
+        if len(file_ids) == 1:
+            m_type, f_id = file_ids[0]
+            if m_type == "photo":
+                try:
+                    resp = await client.post(f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendPhoto", json={"chat_id": str(chat_id), "photo": f_id})
+                    return file_ids if resp.status_code == 200 else None
+                except Exception as e:
+                    logger.error(f"Exception sendPhoto file_ids: {e}")
+                    return None
+            else:
+                try:
+                    resp = await client.post(f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendDocument", json={"chat_id": str(chat_id), "document": f_id})
+                    return file_ids if resp.status_code == 200 else None
+                except Exception as e:
+                    logger.error(f"Exception sendDocument file_ids: {e}")
+                    return None
         media_array = [{"type": m_type, "media": f_id} for m_type, f_id in file_ids]
         try:
             resp = await client.post(url, json={"chat_id": str(chat_id), "media": media_array})
@@ -342,4 +358,8 @@ async def set_telegram_bot_name(name: str, token: Optional[str] = None) -> Dict[
     if resp.status_code != 200 or not data.get("ok"):
         desc = data.get("description") or f"HTTP {resp.status_code}"
         raise RuntimeError(f"Erreur API Telegram setMyName: {desc}")
+    try:
+        await client.post(url, json={"name": name, "language_code": "fr"})
+    except Exception:
+        pass
     return data

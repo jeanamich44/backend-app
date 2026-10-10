@@ -22,7 +22,8 @@ from app.services.cache import (
     get_cached_settings,
     invalidate_settings,
     invalidate_service,
-    invalidate_active_admins
+    invalidate_active_admins,
+    clear as clear_cache
 )
 from app.services.infrastructure import get_all_infrastructure_metrics, get_error_counts
 from app.services.audience import (
@@ -142,7 +143,6 @@ class PaymentsLimitsPayload(BaseModel):
     maxPendingPaymentsPerClient: Optional[int] = None
 
 class GenerateDocsSettingsPayload(BaseModel):
-    isActive: Optional[bool] = None
     flattenPdf: Optional[bool] = None
     previewOff: Optional[bool] = None
     previewCooldownEnabled: Optional[bool] = None
@@ -865,6 +865,16 @@ async def admin_reset_metrics(admin: Any = Depends(get_current_admin)):
 
 # =====================================================================
 
+@router.post("/cache/clear")
+async def admin_clear_cache(admin: Any = Depends(get_current_admin)):
+    if isinstance(admin, Response):
+        return admin
+    clear_cache()
+    invalidate_generate_docs_config_cache()
+    return {"success": True}
+
+# =====================================================================
+
 @router.get("/infrastructure/metrics")
 async def admin_get_infrastructure_metrics(admin: Any = Depends(get_current_admin)):
     if isinstance(admin, Response):
@@ -1068,7 +1078,6 @@ async def admin_get_settings(admin: Any = Depends(get_current_admin)):
         gd = services_dict.get("generate-docs", {})
         gd_cfg = gd.get("config", {})
         generate_docs_data = {
-            "isActive": gd.get("isActive", True),
             "flattenPdf": bool(gd_cfg.get("flattenPdf", True)),
             "previewOff": bool(gd_cfg.get("previewOff", False)),
             "previewCooldownEnabled": bool(gd_cfg.get("previewCooldownEnabled", True)),
@@ -1574,6 +1583,8 @@ async def admin_toggle_service(payload: ServiceTogglePayload, admin: Any = Depen
     async with pool.acquire() as conn:
         await conn.execute("UPDATE services SET is_active = $1 WHERE slug = $2", payload.isActive, clean_slug)
     invalidate_service(clean_slug)
+    if clean_slug == "generate-docs":
+        invalidate_generate_docs_config_cache()
     return {"success": True, "slug": clean_slug, "isActive": payload.isActive}
 
 # =====================================================================
@@ -1584,7 +1595,7 @@ async def admin_save_generate_docs(payload: GenerateDocsSettingsPayload, admin: 
         return admin
     pool = await get_db_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT is_active, config, prices FROM services WHERE slug = 'generate-docs'")
+        row = await conn.fetchrow("SELECT config, prices FROM services WHERE slug = 'generate-docs'")
         if not row:
             return Response(status_code=404, content='{"error": "Service generate-docs introuvable"}', media_type="application/json")
         
@@ -1597,10 +1608,6 @@ async def admin_save_generate_docs(payload: GenerateDocsSettingsPayload, admin: 
         while isinstance(pr, str):
             pr = json.loads(pr)
         pr_data = pr if isinstance(pr, dict) else {}
-
-        is_active = row["is_active"]
-        if payload.isActive is not None:
-            is_active = payload.isActive
 
         if payload.flattenPdf is not None:
             cfg_data["flattenPdf"] = bool(payload.flattenPdf)
@@ -1639,8 +1646,8 @@ async def admin_save_generate_docs(payload: GenerateDocsSettingsPayload, admin: 
                     pass
 
         await conn.execute(
-            "UPDATE services SET is_active = $1, config = $2, prices = $3 WHERE slug = 'generate-docs'",
-            is_active, json.dumps(cfg_data), json.dumps(pr_data)
+            "UPDATE services SET config = $1, prices = $2 WHERE slug = 'generate-docs'",
+            json.dumps(cfg_data), json.dumps(pr_data)
         )
     invalidate_service("generate-docs")
     invalidate_generate_docs_config_cache()

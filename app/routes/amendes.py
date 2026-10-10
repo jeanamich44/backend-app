@@ -94,12 +94,15 @@ async def _notify_admins_new_amende(
     uploaded_media = None
     for r in admin_rows:
         aid = r["id"]
-        try:
-            if telegram_files:
+        if telegram_files:
+            try:
                 if not uploaded_media:
                     uploaded_media = await send_telegram_media_group(aid, files_list=telegram_files)
                 else:
                     await send_telegram_media_group(aid, file_ids=uploaded_media)
+            except Exception:
+                pass
+        try:
             res = await send_telegram_message(
                 chat_id=aid,
                 text=decision_text,

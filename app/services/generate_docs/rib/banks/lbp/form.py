@@ -6,7 +6,8 @@ def get_form_schema() -> dict:
             "title": "GÉNÉRATEUR RIB LA BANQUE POSTALE",
             "logo": "lbp",
             "apiBase": "/api/generate-docs/rib/lbp",
-            "headerBg": "linear-gradient(to right, #002D72, #001A44)",
+            "headerBg": "bg-gradient-to-br from-blue-900/60 to-slate-950 border-blue-500/30",
+            "logoClass": "scale-110",
             "priceKey": "lbp",
             "subtitle": "RIB La Banque Postale certifié",
             "filenameTemplate": f"RIB_LBP_{copy.NOM}.pdf"

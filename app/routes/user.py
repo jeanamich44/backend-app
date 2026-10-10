@@ -66,6 +66,7 @@ async def get_me(user: Dict[str, Any] = Depends(get_current_user)):
         "id": user["id"],
         "username": user["username"],
         "first_name": user["first_name"],
+        "photo_url": user.get("photo_url"),
         "balance": user["balance"],
         "admin": bool(user.get("admin", False)),
         "admin_slug": admin_slug,
