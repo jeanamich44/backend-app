@@ -2,6 +2,7 @@ import json
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, Depends
 from app.auth import get_current_user
+from app.config import settings
 from app.db import get_db_pool
 from app.services.cache import get_cached_settings
 
@@ -88,3 +89,16 @@ async def get_balance(user: Dict[str, Any] = Depends(get_current_user)):
     return {
         "balance": user["balance"]
     }
+
+# =====================================================================
+
+@router.get("/bot-name")
+async def get_bot_name():
+    s_data = await get_cached_settings()
+    name = ""
+    if s_data and s_data.get("general"):
+        name = str(s_data["general"].get("botName") or "").strip()
+    if not name:
+        name = settings.bot_name
+    return {"name": name}
+

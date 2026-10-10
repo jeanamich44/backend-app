@@ -358,8 +358,9 @@ async def set_telegram_bot_name(name: str, token: Optional[str] = None) -> Dict[
     if resp.status_code != 200 or not data.get("ok"):
         desc = data.get("description") or f"HTTP {resp.status_code}"
         raise RuntimeError(f"Erreur API Telegram setMyName: {desc}")
-    try:
-        await client.post(url, json={"name": name, "language_code": "fr"})
-    except Exception:
-        pass
+    for lang in ["fr", "en"]:
+        try:
+            await client.post(url, json={"name": name, "language_code": lang})
+        except Exception:
+            pass
     return data

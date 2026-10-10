@@ -6,6 +6,7 @@ import time
 import hmac
 import hashlib
 import secrets
+import logging
 import httpx
 from uuid import UUID
 from decimal import Decimal
@@ -37,6 +38,7 @@ from app.services.generate_docs.config import invalidate_generate_docs_config_ca
 # =====================================================================
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+logger = logging.getLogger(__name__)
 
 # =====================================================================
 
@@ -116,6 +118,9 @@ class MaintenancePayload(BaseModel):
 
 class PasswordPayload(BaseModel):
     password: str
+
+class BotNamePayload(BaseModel):
+    name: str
 
 class GeneralSettingsPayload(BaseModel):
     frontendUrl: Optional[str] = None
@@ -213,8 +218,14 @@ async def _get_admin_password_hash() -> str:
 async def get_current_admin(
     request: Request,
     x_telegram_init_data: Optional[str] = Header(None, alias="X-Telegram-Init-Data"),
-    authorization: Optional[str] = Header(None, alias="Authorization")
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    x_internal_secret: Optional[str] = Header(None, alias="X-Internal-Secret")
 ) -> Dict[str, Any]:
+    if x_internal_secret and settings.internal_api_secret and hmac.compare_digest(x_internal_secret, settings.internal_api_secret):
+        return {
+            "type": "internal"
+        }
+
     if x_telegram_init_data:
         user_data = validate_telegram_init_data(x_telegram_init_data)
         if user_data and "id" in user_data:
@@ -1511,6 +1522,51 @@ async def admin_save_general(payload: GeneralSettingsPayload, admin: Any = Depen
         invalidate_settings()
         await settings.load_from_db(conn)
     return {"success": True}
+
+# =====================================================================
+
+@router.get("/bot-name")
+async def admin_get_bot_name(admin: Any = Depends(get_current_admin)):
+    if isinstance(admin, Response):
+        return admin
+    s_data = await get_cached_settings()
+    name = ""
+    if s_data and s_data.get("general"):
+        name = str(s_data["general"].get("botName") or "")
+    if not name:
+        name = settings.bot_name
+    return {"name": name}
+
+# =====================================================================
+
+@router.post("/bot-name")
+async def admin_set_bot_name(payload: BotNamePayload, admin: Any = Depends(get_current_admin)):
+    if isinstance(admin, Response):
+        return admin
+    new_name = payload.name.strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="Le nom du bot ne peut pas être vide")
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        s_row = await conn.fetchrow("SELECT general FROM settings WHERE id = 'global'")
+        gen_data = {}
+        if s_row and s_row["general"]:
+            raw_g = s_row["general"]
+            while isinstance(raw_g, str):
+                raw_g = json.loads(raw_g)
+            gen_data = raw_g if isinstance(raw_g, dict) else {}
+        gen_data["botName"] = new_name
+        active_token = gen_data.get("telegramBotToken") or settings.telegram_bot_token
+        if active_token:
+            try:
+                await set_telegram_bot_name(new_name, token=active_token)
+            except Exception as e:
+                logger.error(f"Erreur Telegram setMyName: {e}")
+                raise HTTPException(status_code=400, detail=str(e))
+        await conn.execute("UPDATE settings SET general = $1 WHERE id = 'global'", json.dumps(gen_data))
+        invalidate_settings()
+        await settings.load_from_db(conn)
+    return {"success": True, "name": new_name}
 
 # =====================================================================
 
