@@ -111,7 +111,7 @@ def map_request_to_config(req_data: dict) -> dict:
         "decouvert_autorise": req_data.get("decouvert_autorise") or "300,00",
         "solde_initial": req_data.get("solde_initial") or "3450,00",
         "nb_transactions": req_data.get("nb_transactions_moyen", 14),
-        "start_num_releve": req_data.get("numero_releve_debut", 1),
+        "start_num_releve": req_data.get("numero_releve_debut") or req_data.get("start_num_releve"),
         "afficher_ccp": req_data.get("afficher_ccp", True),
         
         "has_epargne": req_data.get("include_epargne", False),

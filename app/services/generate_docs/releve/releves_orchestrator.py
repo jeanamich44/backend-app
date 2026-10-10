@@ -271,7 +271,11 @@ def generate_multi_releves(config, start_month, start_year, duration_months=3):
         
     months_seq = get_month_sequence(start_month, start_year, duration_months)
     runtime_cfg["bank_type"] = config.get("bank_type", "lbp")
-    start_num_releve = int(config.get("start_num_releve", config.get("numero_releve_debut", start_month if start_month else 1)))
+    raw_start_num = config.get("start_num_releve") or config.get("numero_releve_debut")
+    try:
+        start_num_releve = int(raw_start_num) if raw_start_num is not None and str(raw_start_num).strip() else int(start_month if start_month else 1)
+    except Exception:
+        start_num_releve = int(start_month if start_month else 1)
     
     current_ccp_solde = runtime_cfg["solde_initial"]
     current_epargne_solde = runtime_cfg.get("solde_livret_a_initial", 3500.0)

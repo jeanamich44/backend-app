@@ -1479,8 +1479,9 @@ async def admin_save_general(payload: GeneralSettingsPayload, admin: Any = Depen
             if active_token and new_bot_name:
                 try:
                     await set_telegram_bot_name(new_bot_name, token=active_token)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(f"Erreur Telegram setMyName: {e}")
+                    raise HTTPException(status_code=400, detail=str(e))
         if payload.supportTelegram is not None:
             gen_data["supportTelegram"] = payload.supportTelegram.strip()
         if payload.supportTelegram2 is not None:
